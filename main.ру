@@ -148,9 +148,9 @@ async def add_todo_start(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(BotStates.waiting_for_todo)
 async def add_todo_save(message: types.Message, state: FSMContext):
-async with aiosqlite.connect("db.sqlite") as db:
-    await db.execute("INSERT INTO todos (user_id, task) VALUES (?, ?)", (message.from_user.id, message.text))
-    await db.commit()
+    async with aiosqlite.connect("db.sqlite") as db:
+        await db.execute("INSERT INTO todos (user_id, task) VALUES (?, ?)", (message.from_user.id, message.text))
+        await db.commit()
     await state.clear()
     await message.answer("✅ Дело добавлено в список!", reply_markup=get_todo_menu())
 
