@@ -1,25 +1,112 @@
 import asyncio
 import logging
 import os
+import html
+import random
 import aiosqlite
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiohttp import web
 
-BOT_TOKEN = "9257823958:AAEGecZSkjljfY1NdAdIkaQNHGcXrkSuOow"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "ВСТАВЬ_ТОКЕН")
+DB = "db.sqlite"
+
+DAYS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+DAYS_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+# ---------- МИЛЫЙ СТИЛЬ ----------
+CUTE_IMAGES = [
+    "https://images.unsplash.com/photo-151724813546-076164d0d2d6?w=600",  # котики
+    "https://images.unsplash.com/photo-1604896349745-0c51c66d1e39?w=600",  # aesthetic + книги
+    "https://images.unsplash.com/photo-1481758922107-c3e15e784c7b?w=600",  # розовый вайб
+]
+
+FALLBACK_PHRASES = [
+    "Ой, кошечка, не совсем поняла тебя… что хочешь? ✨",
+    "Зайка, напиши по-другому, чтобы я поняла 🌸",
+    "Эээ, звучит интересно. Расскажешь чуть подробнее? 💕",
+]
+
+SCHEDULE_CLOSINGS = [
+    "Удачи тебе, красотка ✨",
+    "Хорошего дня, милашка 💕",
+    "Удачной недели, ты молодец 🌸",
+    "Хороших оценок ✨",
+    "Отдыхай, ты это заслужила 💃🌸",
+]
+
+HW_PHRASES = [
+    "Удачи с домашечкой, ты точно справишься 💕",
+    "Маленькая задача — и всё готово. Ты супер ✨",
+    "Не переживай, разберёшься. Я в тебя верю 🌸",
+]
+
+MOTIV_PHRASES = [
+    "Ура, одна галочка! Ещё чуть-чуть — и весь список готов ✨",
+    "Ты просто супер, зайка! Ещё один пункт закрыт 💕",
+    "Молодец, красотка! Это реально экономит кучу времени 🌸",
+    "Вот это дисциплина! Ещё одна задача — и можно выдохнуть 💃",
+    "Так держать! С таким темпом всё успеешь и даже чаю попить ☕",
+]
+
+THANKS_ADDRS = ["красотка", "зайка", "милашка", "кошечка"]
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Функция для определения четности недели
+# ---------- ТЕМАТИЧЕСКИЕ ЭМОДЗИ ПО ПРЕДМЕТАМ ----------
+def subject_emoji(subj: str) -> str:
+    s = (subj or "").lower()
+    if any(x in s for x in ["конституц", "гос", "право"]):
+        return "🏛️"
+    if any(x in s for x in ["уголов", "кримин", "процесс"]):
+        return "⚖️"
+    if any(x in s for x in ["гражд", "хозяйств", "предпринимат"]):
+        return "📜"
+    if any(x in s for x in ["история", "ист", "древн"]):
+        return "📂"
+    return "📚"
+
+# ---------- МЕНЮ ----------
+def main_menu_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🌸 Расписание на сегодня"), KeyboardButton(text="🌷 Расписание на завтра")],
+            [KeyboardButton(text="🎀 Расписание на недельку")],
+            [KeyboardButton(text="💖 Добавить домашечку ✨"), KeyboardButton(text="🌼 Заметочка")],
+            [KeyboardButton(text="🌟 Списочек дел"), KeyboardButton(text="📚 Мои домашечки")],
+            [KeyboardButton(text="🪄 Настроить недельку"), KeyboardButton(text="🦋 Поправить расписание")],
+        ],
+        resize_keyboard=True
+    )
+
+def get_back_btn():
+    b = InlineKeyboardBuilder()
+    b.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    b.adjust(1)
+    return b.as_markup()
+
 def get_week_type(date_obj):
-    week_number = date_obj.isocalendar()[1]
-    return "Четная" if week_number % 2 == 0 else "Нечетная"
+    return "Четная" if date_obj.isocalendar()[1] % 2 == 0 else "Нечетная"
+
+def normalize_week(text):
+    t = (text or "").strip().lower()
+    if t.startswith("чет"):
+        return "Четная"
+    if t.startswith("нечет") or t.startswith("нечёт"):
+        return "Нечетная"
+    if t.startswith("каж"):
+        return "Каждую"
+    return None
+
+def esc(s):
+    return html.escape(str(s or ""))
 
 class BotStates(StatesGroup):
     waiting_for_hw_text = State()
@@ -31,271 +118,549 @@ class BotStates(StatesGroup):
     waiting_for_time = State()
     waiting_for_room = State()
     waiting_for_teacher = State()
+    waiting_for_todo = State()
 
+# ---------- БАЗА ----------
 async def init_db():
-    async with aiosqlite.connect("db.sqlite") as db:
+    async with aiosqlite.connect(DB) as db:
         await db.execute("""CREATE TABLE IF NOT EXISTS schedule
-            (id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, week_type TEXT, time TEXT, subject TEXT, lesson_type TEXT, room TEXT, teacher TEXT, note TEXT)""")
-        await db.execute("CREATE TABLE IF NOT EXISTS homework (id INTEGER PRIMARY KEY, user_id INTEGER, subject TEXT, task TEXT, photo_id TEXT, done INTEGER DEFAULT 0)")
+            (id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, week_type TEXT, time TEXT,
+             subject TEXT, lesson_type TEXT, room TEXT, teacher TEXT, note TEXT)""")
+        await db.execute("""CREATE TABLE IF NOT EXISTS homework
+            (id INTEGER PRIMARY KEY, user_id INTEGER, subject TEXT, task TEXT, photo_id TEXT, done INTEGER DEFAULT 0)""")
+        await db.execute("""CREATE TABLE IF NOT EXISTS tasks
+            (id INTEGER PRIMARY KEY, user_id INTEGER, text TEXT, done INTEGER DEFAULT 0)""")
+        # Счётчик достижений
+        await db.execute("CREATE TABLE IF NOT EXISTS users_stats (user_id INTEGER PRIMARY KEY, total_done INTEGER DEFAULT 0)")
         await db.commit()
 
-def get_main_menu():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="📅 Расписание на сегодня", callback_data="sched_today")
-    builder.button(text="📅 Расписание на завтра", callback_data="sched_tomorrow")
-    builder.button(text="🗓 Расписание на неделю", callback_data="sched_week")
-    builder.button(text="➕ Добавить ДЗ", callback_data="add_hw")
-    builder.button(text="⚙️ Настроить расписание", callback_data="setup_schedule")
-    builder.adjust(1)
-    return builder.as_markup()
-
-def get_back_btn():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
-    return builder.as_markup()
-
+# ---------- СТАРТ ----------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer(f"Привет, {message.from_user.first_name}! 👋\nВыбери раздел:", reply_markup=get_main_menu())
+    name = message.from_user.first_name or "зайка"
+    await message.answer(f"Приветик, {name} 💕✨ Я твоя помощница. Выбирай, что хочется:", reply_markup=main_menu_kb())
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("🏠 Главное меню:", reply_markup=get_main_menu())
+    await callback.message.answer("🏰 Выбирай раздел:", reply_markup=main_menu_kb())
     await callback.answer()
 
-# --- РАСПИСАНИЕ (ОБЩАЯ ФУНКЦИЯ) ---
-async def show_schedule_for_day(callback: types.CallbackQuery, target_date: datetime):
-    days_ru = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
-    day_name = days_ru[target_date.weekday()]
+# ---------- ДЕНЬ ----------
+async def build_day_view(user_id, target_date):
+    day_name = DAYS[target_date.weekday()]
     week_type = get_week_type(target_date)
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("""SELECT id, time, subject, lesson_type, room, teacher, note FROM schedule
+            WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую') ORDER BY time""",
+            (user_id, day_name, week_type)) as cur:
+            lessons = await cur.fetchall()
+        async with db.execute("SELECT id, subject, task, photo_id, done FROM homework WHERE user_id=?", (user_id,)) as cur:
+            all_hws = await cur.fetchall()
 
-    async with aiosqlite.connect("db.sqlite") as db:
-        async with db.execute("SELECT id, time, subject, lesson_type, room, teacher, note FROM schedule WHERE user_id = ? AND day = ? AND (week_type = ? OR week_type = 'Каждую') ORDER BY time", (callback.from_user.id, day_name, week_type)) as cursor:
-            lessons = await cursor.fetchall()
-        async with db.execute("SELECT subject, task, photo_id FROM homework WHERE user_id = ? AND done = 0", (callback.from_user.id,)) as cursor:
-            all_hws = await cursor.fetchall()
-
-    header = f"📅 **{day_name} ({week_type} неделя)**\n\n"
     if not lessons:
-        await callback.message.edit_text(header + "Пар нет! 🎉", reply_markup=get_back_btn(), parse_mode="Markdown")
-        return
+        return f"📅 {day_name} ({week_type} неделя)\n\nПар нет… Ой, как круто 🎉✨ Ура, можно отдыхать 💃🌸", []
 
-    text = header
-    has_photos = False
-    for l in lessons:
-        lesson_id, time, subj, l_type, room, teacher, note = l
-        text += f"⏰ {time} | 📖 {subj}\n"
-        text += f"🎓 {l_type}"
-        if room: text += f" | 🚪 {room}"
-        if teacher: text += f" | 👨‍🏫 {teacher}"
+    text = f"📅 <b>{day_name} ({week_type} неделя)</b>\n\n"
+    buttons = []
+    for lesson_id, time_, subj, l_type, room, teacher, note in lessons:
+        emoji = subject_emoji(subj)
+        text += f"🎀 {esc(time_)} | {emoji} {esc(subj)}\n"
+        text += f"✨ {esc(l_type)}"
+        if room: text += f" | 📍 {esc(room)}"
+        if teacher: text += f" | 🦋 {esc(teacher)}"
         text += "\n"
 
-        if "семинар" in l_type.lower():
-            for hw in all_hws:
-                hw_subj, hw_task, hw_photo = hw
-                if hw_subj.lower() in subj.lower() or subj.lower() in hw_subj.lower():
-                    text += f"   📝 ДЗ: {hw_task}\n"
-                    if hw_photo:
-                        text += f"   🖼 [Фото прикреплено]\n"
-                        has_photos = True
-        if note:
-            text += f"   🗒 Заметка: {note}\n"
+        subj_l = subj.lower()
+        for hw_id, hw_subj, hw_task, hw_photo, hw_done in all_hws:
+            ws = hw_subj.lower()
+            if ws in subj_l or any(w.lower() in subj_l for w in ws.split()):
+                task = esc(hw_task)
+                if hw_done:
+                    text += f"   💖 <s>Домашечка: {task}</s>\n"
+                else:
+                    text += f"   💖 Домашечка: {task}\n"
+                    if hw_photo: text += f"   🖼 [Фото]\n"
+                    buttons.append((f"✅ Выполнено: {hw_subj[:15]}", f"hwdone_{hw_id}"))
+                    if hw_photo: buttons.append((f"🖼 Фото ({hw_subj[:12]})", f"hwphoto_{hw_id}"))
+
+        if note: text += f"   💌 Заметочка: {esc(note)}\n"
+        buttons.append((f"💌 Заметка к {subj[:15]}", f"addnote_{lesson_id}"))
         text += "\n"
+    return text, buttons
 
-    builder = InlineKeyboardBuilder()
-    for l in lessons:
-        builder.button(text=f"🗒 Заметка к {l[2]}", callback_data=f"addnote_{l[0]}")
-    if has_photos:
-        builder.button(text="🖼 Посмотреть фото к ДЗ", callback_data="view_hw_photos")
-    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
-    builder.adjust(1)
+def buttons_to_kb(buttons):
+    b = InlineKeyboardBuilder()
+    for label, data in buttons:
+        b.button(text=label, callback_data=data)
+    b.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    b.adjust(1)
+    return b.as_markup()
 
-    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+@dp.message(F.text == "🌸 Расписание на сегодня")
+async def sched_today_msg(message: types.Message):
+    text, buttons = await build_day_view(message.from_user.id, datetime.now())
+    await message.answer(text + "\n\n" + random.choice(SCHEDULE_CLOSINGS), reply_markup=buttons_to_kb(buttons), parse_mode="HTML")
 
-@dp.callback_query(F.data == "sched_today")
-async def sched_today(callback: types.CallbackQuery):
-    await show_schedule_for_day(callback, datetime.now())
-    await callback.answer()
+@dp.message(F.text == "🌷 Расписание на завтра")
+async def sched_tomorrow_msg(message: types.Message):
+    text, buttons = await build_day_view(message.from_user.id, datetime.now() + timedelta(days=1))
+    await message.answer(text + "\n\n" + random.choice(SCHEDULE_CLOSINGS), reply_markup=buttons_to_kb(buttons), parse_mode="HTML")
 
-@dp.callback_query(F.data == "sched_tomorrow")
-async def sched_tomorrow(callback: types.CallbackQuery):
-    await show_schedule_for_day(callback, datetime.now() + timedelta(days=1))
-    await callback.answer()
-
-@dp.callback_query(F.data == "sched_week")
-async def sched_week(callback: types.CallbackQuery):
-    days_ru = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
-    today = datetime.now()
-    monday = today - timedelta(days=today.weekday())
+# ---------- НЕДЕЛЯ ----------
+async def build_week_view(user_id, offset):
+    monday = datetime.now() - timedelta(days=datetime.now().weekday()) + timedelta(weeks=offset)
     week_type = get_week_type(monday)
-
-    text = f"🗓 **Расписание на неделю ({week_type})**\n\n"
-    async with aiosqlite.connect("db.sqlite") as db:
-        for i, day_name in enumerate(days_ru):
-            async with db.execute("SELECT time, subject, lesson_type, room FROM schedule WHERE user_id = ? AND day = ? AND (week_type = ? OR week_type = 'Каждую') ORDER BY time", (callback.from_user.id, day_name, week_type)) as cursor:
-                lessons = await cursor.fetchall()
-
+    text = f"🗓 <b>Расписание на неделю ({week_type})</b>\n\n"
+    empty = True
+    async with aiosqlite.connect(DB) as db:
+        for i, day_name in enumerate(DAYS):
+            d = monday + timedelta(days=i)
+            async with db.execute("""SELECT time, subject, lesson_type, room FROM schedule
+                WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую') ORDER BY time""",
+                (user_id, day_name, get_week_type(d))) as cur:
+                lessons = await cur.fetchall()
             if lessons:
-                text += f"**{day_name}:**\n"
+                empty = False
+                text += f"<b>{day_name}:</b>\n"
                 for l in lessons:
-                    text += f"  {l[0]} - {l[1]} ({l[2]})"
-                    if l[3]: text += f", ауд. {l[3]}"
+                    emoji = subject_emoji(l[1])
+                    text += f"  {esc(l[0])} - {emoji} {esc(l[1])} ({esc(l[2])})"
+                    if l[3]: text += f", ауд. {esc(l[3])}"
                     text += "\n"
                 text += "\n"
+    if empty:
+        text += "На этой недельке пока ни одной пары — просто красота 💕✨"
+    return text
 
-    if text == f"🗓 **Расписание на неделю ({week_type})**\n\n":
-        text += "На эту неделю пар не задано."
-
-    await callback.message.edit_text(text, reply_markup=get_back_btn(), parse_mode="Markdown")
+async def send_week(callback: types.CallbackQuery, offset):
+    text = await build_week_view(callback.from_user.id, offset)
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Пред. неделя", callback_data=f"week_{offset-1}")
+    b.button(text="След. неделя ➡️", callback_data=f"week_{offset+1}")
+    b.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    b.adjust(2, 1)
+    await callback.message.edit_text(text + "\n\n" + random.choice(SCHEDULE_CLOSINGS), reply_markup=b.as_markup(), parse_mode="HTML")
     await callback.answer()
 
-@dp.callback_query(F.data == "view_hw_photos")
-async def view_hw_photos(callback: types.CallbackQuery):
-    async with aiosqlite.connect("db.sqlite") as db:
-        async with db.execute("SELECT task, photo_id FROM homework WHERE user_id = ? AND done = 0 AND photo_id IS NOT NULL", (callback.from_user.id,)) as cursor:
-            rows = await cursor.fetchall()
-    await callback.message.edit_text("Загружаю фото...", reply_markup=get_back_btn())
-    for task, photo in rows:
-        await callback.message.answer_photo(photo=photo, caption=f"📝 ДЗ: {task}")
-    await callback.answer()
+@dp.message(F.text == "🎀 Расписание на недельку")
+async def sched_week_msg(message: types.Message):
+    text = await build_week_view(message.from_user.id, 0)
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Пред. неделя", callback_data="week_-1")
+    b.button(text="След. неделя ➡️", callback_data="week_1")
+    b.adjust(2)
+    await message.answer(text + "\n\n" + random.choice(SCHEDULE_CLOSINGS), reply_markup=b.as_markup(), parse_mode="HTML")
 
-# --- ДОБАВЛЕНИЕ ДЗ (УМНЫЙ ПОИСК) ---
-@dp.callback_query(F.data == "add_hw")
-async def add_hw_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Напиши предмет и задание (например: 'История выучить Романовых'):", reply_markup=get_back_btn())
+@dp.callback_query(F.data.startswith("week_"))
+async def sched_week_cb(callback: types.CallbackQuery):
+    offset = int(callback.data.split("_")[1])
+    await send_week(callback, offset)
+
+# ---------- ДЗ ----------
+@dp.message(F.text == "💖 Добавить домашечку ✨")
+async def add_hw_start(message: types.Message, state: FSMContext):
     await state.set_state(BotStates.waiting_for_hw_text)
-    await callback.answer()
+    await message.answer(random.choice(HW_PHRASES) + "\n\nНапиши, какая домашечка и что сделать:")
 
 @dp.message(BotStates.waiting_for_hw_text)
 async def add_hw_text(message: types.Message, state: FSMContext):
-    await state.update_data(hw_text=message.text)
-    await message.answer("✅ Текст записан! Теперь пришли **фото** к этому ДЗ (или напиши 'Нет'):", parse_mode="Markdown")
+    await state.update_data(hw_text=message.text, photos=[])
+    await message.answer("✅ Текст записан! Присылай фото (можно несколько). Когда закончишь — «Готово», или «Нет», если без фото:")
     await state.set_state(BotStates.waiting_for_hw_photo)
 
 @dp.message(BotStates.waiting_for_hw_photo, F.photo)
 async def add_hw_photo(message: types.Message, state: FSMContext):
-    await save_hw_final(message, state, message.photo[-1].file_id)
+    data = await state.get_data()
+    photos = data.get("photos", []) + [message.photo[-1].file_id]
+    await state.update_data(photos=photos)
+    await message.answer(f"🖼 Фото добавлено (всего: {len(photos)}). Ещё или «Готово»:")
 
 @dp.message(BotStates.waiting_for_hw_photo)
-async def add_hw_no_photo(message: types.Message, state: FSMContext):
-    await save_hw_final(message, state, None)
+async def add_hw_finish(message: types.Message, state: FSMContext):
+    if (message.text or "").strip().lower() not in ("готово", "нет"):
+        await message.answer("Присылай фото или напиши «Готово» / «Нет» 🙂")
+        return
+    await save_hw_final(message, state)
 
-async def save_hw_final(message: types.Message, state: FSMContext, photo_id):
+async def save_hw_final(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    hw_text = data['hw_text']
-    subject_guess = hw_text.split()[0] if hw_text else "Общее"
+    hw_text = data["hw_text"]
+    photos = data.get("photos", [])
+    words = [w for w in hw_text.split() if len(w) > 3]
 
-    async with aiosqlite.connect("db.sqlite") as db:
-        # Ищем семинар
-        async with db.execute("SELECT subject, lesson_type FROM schedule WHERE user_id = ? AND subject LIKE ?", (message.from_user.id, f"%{subject_guess}%")) as cursor:
-            lessons = await cursor.fetchall()
+    nearest = None
+    today = datetime.now()
+    async with aiosqlite.connect(DB) as db:
+        for i in range(8):
+            d = today + timedelta(days=i)
+            day_name = DAYS[d.weekday()]
+            for w in words:
+                async with db.execute("""SELECT subject, lesson_type FROM schedule
+                    WHERE user_id=? AND day=? AND subject LIKE ?""",
+                    (message.from_user.id, day_name, f"%{w}%")) as cur:
+                    rows = await cur.fetchall()
+                for r in rows:
+                    if "семинар" in r[1].lower():
+                        nearest = r[0]
+                        break
+                if nearest: break
+            if nearest: break
 
-    seminar = next((l for l in lessons if "семинар" in l[1].lower()), None)
-
-    if not seminar:
-        await message.answer("❌ Семинар по этому предмету не найден. ДЗ не сохранено.", reply_markup=get_main_menu())
+    if not nearest:
+        await message.answer("❌ Ближайший семинар по этому тексту не найден, домашечка не сохранилась.")
     else:
-        exact_subject = seminar[0]
-        async with aiosqlite.connect("db.sqlite") as db:
-            await db.execute("INSERT INTO homework (user_id, subject, task, photo_id) VALUES (?, ?, ?, ?)", (message.from_user.id, exact_subject, hw_text, photo_id))
+        async with aiosqlite.connect(DB) as db:
+            await db.execute("INSERT INTO homework (user_id, subject, task, photo_id) VALUES (?, ?, ?, ?)",
+                (message.from_user.id, nearest, hw_text, ",".join(photos) if photos else None))
             await db.commit()
-        await message.answer(f"✅ ДЗ добавлено к семинару *{exact_subject}*!", reply_markup=get_main_menu(), parse_mode="Markdown")
+        await message.answer(f"✅ Домашечка привязана к <b>{esc(nearest)}</b>! ✨", parse_mode="HTML")
     await state.clear()
 
-# --- ЗАМЕТКИ ---
+# ---------- ВЫПОЛНЕНО / ФОТО / ДОСТИЖЕНИЯ ----------
+@dp.callback_query(F.data.startswith("hwdone_"))
+async def hw_toggle(callback: types.CallbackQuery):
+    hw_id = int(callback.data.split("_")[1])
+    user_id = callback.from_user.id
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT done FROM homework WHERE id=?", (hw_id,)) as cur:
+            row = await cur.fetchone()
+        if not row:
+            await callback.answer("Хм, эта домашечка уже не найдена 🙈")
+            return
+        old_done = row[0]
+        new_done = 0 if old_done else 1
+
+        await db.execute("UPDATE homework SET done=? WHERE id=?", (new_done, hw_id))
+
+        # Счётчик достижений: только при переходе «не выполнено» → «выполнено»
+        if new_done and not old_done:
+            await db.execute("INSERT OR IGNORE INTO users_stats (user_id, total_done) VALUES (?, 0)", (user_id,))
+            async with db.execute("SELECT total_done FROM users_stats WHERE user_id=?", (user_id,)) as cur:
+                r = await cur.fetchone()
+            total = (r[0] if r else 0) + 1
+            await db.execute("UPDATE users_stats SET total_done=? WHERE user_id=?", (total, user_id))
+
+            if total == 5:
+                await callback.message.answer(
+                    "🎉✨ Ого, ты закрыла уже 5 домашек! Это мини-достижение: «Железная дисциплина»! Ты просто супер, красотка! 🌸",
+                    reply_markup=main_menu_kb()
+                )
+                try:
+                    await callback.message.answer_photo(photo=random.choice(CUTE_IMAGES), caption="Для тебя, зайка 💕")
+                except Exception:
+                    pass
+
+        await db.commit()
+
+    if new_done:
+        await callback.answer(random.choice(MOTIV_PHRASES))
+    else:
+        await callback.answer("Вернула в список — ничего страшного, успеешь позже 🌸")
+
+    text, buttons = await build_day_view(user_id, datetime.now())
+    try:
+        await callback.message.edit_text(text, reply_markup=buttons_to_kb(buttons), parse_mode="HTML")
+    except Exception:
+        pass
+
+@dp.callback_query(F.data.startswith("hwphoto_"))
+async def hw_photos(callback: types.CallbackQuery):
+    hw_id = int(callback.data.split("_")[1])
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT task, photo_id FROM homework WHERE id=?", (hw_id,)) as cur:
+            row = await cur.fetchone()
+    await callback.answer()
+    if row and row[1]:
+        for pid in row[1].split(","):
+            try:
+                await callback.message.answer_photo(photo=pid, caption=f"📝 {esc(row[0])}")
+            except Exception:
+                pass
+
+@dp.message(F.text == "📚 Мои домашечки")
+async def hw_list(message: types.Message):
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT id, subject, task, photo_id, done FROM homework WHERE user_id=? ORDER BY id DESC", (message.from_user.id,)) as cur:
+            rows = await cur.fetchall()
+    if not rows:
+        await message.answer("Домашечек пока нет — и это прекрасно ✨")
+        return
+    text = "📝 <b>Домашечки:</b>\n\n"
+    buttons = []
+    for hw_id, subj, task, photo, done in rows:
+        emoji = subject_emoji(subj)
+        if done:
+            text += f"<s>▪️ {emoji} {esc(subj)}: {esc(task)}</s>\n"
+            buttons.append((f"↩️ Вернуть: {subj[:15]}", f"hwdone_{hw_id}"))
+        else:
+            text += f"▪️ {emoji} {esc(subj)}: {esc(task)}\n"
+            buttons.append((f"✅ Выполнено: {subj[:15]}", f"hwdone_{hw_id}"))
+        if photo: buttons.append((f"🖼 Фото ({subj[:12]})", f"hwphoto_{hw_id}"))
+    await message.answer(text + "\n" + random.choice(HW_PHRASES), reply_markup=buttons_to_kb(buttons), parse_mode="HTML")
+
+# ---------- ЗАМЕТКИ ----------
+@dp.message(F.text == "🌼 Заметочка")
+async def note_start(message: types.Message):
+    b = InlineKeyboardBuilder()
+    for i, d in enumerate(DAYS_SHORT):
+        b.button(text=d, callback_data=f"nday_{i}")
+    b.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    b.adjust(4, 3, 1)
+    await message.answer("К какой паре добавить заметочку? Выбери день:", reply_markup=b.as_markup())
+
+@dp.callback_query(F.data.startswith("nday_"))
+async def note_day(callback: types.CallbackQuery):
+    day_name = DAYS[int(callback.data.split("_")[1])]
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT id, time, subject, lesson_type FROM schedule WHERE user_id=? AND day=? ORDER BY time",
+            (callback.from_user.id, day_name)) as cur:
+            lessons = await cur.fetchall()
+    if not lessons:
+        await callback.answer("В этот день пар пока нет ✨")
+        return
+    b = InlineKeyboardBuilder()
+    for lid, t, subj, ltype in lessons:
+        b.button(text=f"{t} {subj} ({ltype})", callback_data=f"addnote_{lid}")
+    b.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    b.adjust(1)
+    await callback.message.edit_text(f"Пары на {day_name}: выбери, к какой добавить заметочку:", reply_markup=b.as_markup())
+    await callback.answer()
+
 @dp.callback_query(F.data.startswith("addnote_"))
 async def add_note(callback: types.CallbackQuery, state: FSMContext):
-    lesson_id = callback.data.split("_")[1]
-    await state.update_data(note_id=lesson_id)
-    await callback.message.edit_text("Напиши текст заметки:", reply_markup=get_back_btn())
+    await state.update_data(note_id=callback.data.split("_")[1])
+    await callback.message.answer("Напиши текст заметочки:")
     await state.set_state(BotStates.waiting_for_note)
     await callback.answer()
 
 @dp.message(BotStates.waiting_for_note)
 async def save_note(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    async with aiosqlite.connect("db.sqlite") as db:
-        await db.execute("UPDATE schedule SET note = ? WHERE id = ?", (message.text, data['note_id']))
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("UPDATE schedule SET note=? WHERE id=?", (message.text, data["note_id"]))
         await db.commit()
     await state.clear()
-    await message.answer("✅ Заметка сохранена!", reply_markup=get_main_menu())
+    await message.answer("✅ Заметочка на месте 💕")
 
-# --- НАСТРОЙКА РАСПИСАНИЯ (С ЧЕТНОСТЬЮ) ---
-@dp.callback_query(F.data == "setup_schedule")
-async def setup_schedule(callback: types.CallbackQuery):
-    builder = InlineKeyboardBuilder()
-    days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    for i, d in enumerate(days):
-        builder.button(text=d, callback_data=f"add_day_{i}")
-    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
-    builder.adjust(3, 3, 1)
-    await callback.message.edit_text("Выбери день недели:", reply_markup=builder.as_markup())
-    await callback.answer()
+# ---------- НАСТРОЙКА / РЕДАКТИРОВАНИЕ ----------
+@dp.message(F.text == "🪄 Настроить недельку")
+async def setup_schedule(message: types.Message):
+    b = InlineKeyboardBuilder()
+    for i, d in enumerate(DAYS_SHORT):
+        b.button(text=d, callback_data=f"add_day_{i}")
+    b.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    b.adjust(4, 3, 1)
+    await message.answer("Строим недельку ✨. Выбери день:", reply_markup=b.as_markup())
 
 @dp.callback_query(F.data.startswith("add_day_"))
 async def add_day(callback: types.CallbackQuery, state: FSMContext):
-    days_full = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
-    day_index = int(callback.data.split("_")[2])
-    await state.update_data(day_name=days_full[day_index])
-    await callback.message.edit_text(f"День: **{days_full[day_index]}**.\nНапиши название предмета:", reply_markup=get_back_btn(), parse_mode="Markdown")
+    day_name = DAYS[int(callback.data.split("_")[1])]
+    await state.update_data(day_name=day_name)
+    await callback.message.answer(f"День: <b>{day_name}</b>. Напиши название предмета:", parse_mode="HTML")
     await state.set_state(BotStates.waiting_for_subj_name)
     await callback.answer()
 
 @dp.message(BotStates.waiting_for_subj_name)
 async def proc_subj(message: types.Message, state: FSMContext):
     await state.update_data(subject=message.text)
-    await message.answer("Тип пары (Лекция/Семинар):")
+    await message.answer("Тип пары (Лекция / Семинар):")
     await state.set_state(BotStates.waiting_for_type)
 
 @dp.message(BotStates.waiting_for_type)
 async def proc_type(message: types.Message, state: FSMContext):
     await state.update_data(lesson_type=message.text)
-    await message.answer("На какой неделе? (Напиши: Четная, Нечетная или Каждую):")
+    await message.answer("На какой неделе? (Четная / Нечетная / Каждую — регистр не важен):")
     await state.set_state(BotStates.waiting_for_week)
 
 @dp.message(BotStates.waiting_for_week)
 async def proc_week(message: types.Message, state: FSMContext):
-    await state.update_data(week_type=message.text)
+    wt = normalize_week(message.text)
+    if not wt:
+        await message.answer("Напиши одним из вариантов: Четная / Нечетная / Каждую 🙂")
+        return
+    await state.update_data(week_type=wt)
     await message.answer("Время (например: 09:00 - 10:30):")
     await state.set_state(BotStates.waiting_for_time)
 
 @dp.message(BotStates.waiting_for_time)
 async def proc_time(message: types.Message, state: FSMContext):
     await state.update_data(time=message.text)
-    await message.answer("Аудитория (или '-'):")
+    await message.answer("Аудитория (или «-»):")
     await state.set_state(BotStates.waiting_for_room)
 
 @dp.message(BotStates.waiting_for_room)
 async def proc_room(message: types.Message, state: FSMContext):
-    room = message.text if message.text != '-' else ''
-    await state.update_data(room=room)
-    await message.answer("ФИО преподавателя (или '-'):")
+    await state.update_data(room="" if message.text == "-" else message.text)
+    await message.answer("ФИО преподавателя (или «-»):")
     await state.set_state(BotStates.waiting_for_teacher)
 
 @dp.message(BotStates.waiting_for_teacher)
 async def proc_teacher(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    teacher = message.text if message.text != '-' else ''
-
-    async with aiosqlite.connect("db.sqlite") as db:
-        await db.execute("""INSERT INTO schedule
-            (user_id, day, week_type, time, subject, lesson_type, room, teacher)
+    teacher = "" if message.text == "-" else message.text
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("""INSERT INTO schedule (user_id, day, week_type, time, subject, lesson_type, room, teacher)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (message.from_user.id, data['day_name'], data['week_type'], data['time'], data['subject'], data['lesson_type'], data['room'], teacher))
+            (message.from_user.id, data["day_name"], data["week_type"], data["time"], data["subject"], data["lesson_type"], data["room"], teacher))
         await db.commit()
-
     await state.clear()
-    await message.answer(f"✅ Пара **{data['subject']}** добавлена!", reply_markup=get_main_menu(), parse_mode="Markdown")
+    await message.answer(f"✅ Пара <b>{esc(data['subject'])}</b> добавлена ✨", reply_markup=main_menu_kb(), parse_mode="HTML")
 
-# --- СЕРВЕР ---
+@dp.message(F.text == "🦋 Поправить расписание")
+async def edit_schedule(message: types.Message):
+    b = InlineKeyboardBuilder()
+    for i, d in enumerate(DAYS_SHORT):
+        b.button(text=d, callback_data=f"eday_{i}")
+    b.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    b.adjust(4, 3, 1)
+    await message.answer("Хочешь что-то поправить? Выбирай день:", reply_markup=b.as_markup())
+
+@dp.callback_query(F.data.startswith("eday_"))
+async def edit_day(callback: types.CallbackQuery):
+    day_index = int(callback.data.split("_")[1])
+    day_name = DAYS[day_index]
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT id, time, subject, lesson_type FROM schedule WHERE user_id=? AND day=? ORDER BY time",
+            (callback.from_user.id, day_name)) as cur:
+            lessons = await cur.fetchall()
+    b = InlineKeyboardBuilder()
+    if not lessons:
+        await callback.answer("В этот день пар нет ✨")
+        return
+    text = f"🔧 <b>{day_name}</b>. Нажми на пару, чтобы удалить:"
+    for lid, t, subj, ltype in lessons:
+        b.button(text=f"🗑 {t} {subj} ({ltype})", callback_data=f"delles_{lid}")
+    b.button(text="➕ Добавить пару в этот день", callback_data=f"edadd_{day_index}")
+    b.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    b.adjust(1)
+    await callback.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("delles_"))
+async def del_lesson(callback: types.CallbackQuery):
+    lid = int(callback.data.split("_")[1])
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT day FROM schedule WHERE id=?", (lid,)) as cur:
+            row = await cur.fetchone()
+        await db.execute("DELETE FROM schedule WHERE id=?", (lid,))
+        await db.commit()
+    await callback.answer("Удалено 🗑")
+    await edit_day(callback)
+
+@dp.callback_query(F.data.startswith("edadd_"))
+async def edit_add(callback: types.CallbackQuery, state: FSMContext):
+    day_name = DAYS[int(callback.data.split("_")[1])]
+    await state.update_data(day_name=day_name)
+    await callback.message.answer(f"День: <b>{day_name}</b>. Напиши название предмета:", parse_mode="HTML")
+    await state.set_state(BotStates.waiting_for_subj_name)
+    await callback.answer()
+
+# ---------- TO-DO ----------
+@dp.message(F.text == "🌟 Списочек дел")
+async def todo_list(message: types.Message):
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT id, text, done FROM tasks WHERE user_id=? ORDER BY id", (message.from_user.id,)) as cur:
+            rows = await cur.fetchall()
+    text = ("✅ <b>Списочек дел:</b>\n\n" if rows else "Списочек пуст. Напиши одно маленькое дело ✨:")
+    buttons = []
+    for tid, t, done in rows:
+        if done:
+            text += f"<s>☑️ {esc(t)}</s>\n"
+            buttons.append((f"↩️ Вернуть: {t[:15]}", f"todo_{tid}"))
+        else:
+            text += f"▫️ {esc(t)}\n"
+            buttons.append((f"✅ Выполнить: {t[:15]}", f"todo_{tid}"))
+        buttons.append((f"🗑 Удалить: {t[:15]}", f"tododel_{tid}"))
+    b = InlineKeyboardBuilder()
+    for label, data in buttons:
+        b.button(text=label, callback_data=data)
+    b.button(text="➕ Добавить дело", callback_data="todo_add")
+    b.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    b.adjust(1)
+    await message.answer(text, reply_markup=b.as_markup(), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("todo_"))
+async def todo_toggle(callback: types.CallbackQuery):
+    tid = int(callback.data.split("_")[1])
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT done FROM tasks WHERE id=?", (tid,)) as cur:
+            row = await cur.fetchone()
+        await db.execute("UPDATE tasks SET done=? WHERE id=?", (0 if row[0] else 1, tid))
+        await db.commit()
+    await callback.answer()
+    await todo_list_msg_refresh(callback)
+
+async def todo_list_msg_refresh(callback: types.CallbackQuery):
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT id, text, done FROM tasks WHERE user_id=? ORDER BY id", (callback.from_user.id,)) as cur:
+            rows = await cur.fetchall()
+    text = ("✅ <b>Списочек дел:</b>\n\n" if rows else "Списочек пуст 🎉")
+    b = InlineKeyboardBuilder()
+    for tid, t, done in rows:
+        if done:
+            text += f"<s>☑️ {esc(t)}</s>\n"
+            b.button(text=f"↩️ Вернуть: {t[:15]}", callback_data=f"todo_{tid}")
+        else:
+            text += f"▫️ {esc(t)}\n"
+            b.button(text=f"✅ Выполнить: {t[:15]}", callback_data=f"todo_{tid}")
+        b.button(text=f"🗑 Удалить: {t[:15]}", callback_data=f"tododel_{tid}")
+    b.button(text="➕ Добавить дело", callback_data="todo_add")
+    b.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    b.adjust(1)
+    try:
+        await callback.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="HTML")
+    except Exception:
+        pass
+
+@dp.callback_query(F.data == "todo_add")
+async def todo_add(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(BotStates.waiting_for_todo)
+    await callback.message.answer("Напиши новое дело ✨:")
+    await callback.answer()
+
+@dp.message(BotStates.waiting_for_todo)
+async def todo_save(message: types.Message, state: FSMContext):
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("INSERT INTO tasks (user_id, text) VALUES (?, ?)", (message.from_user.id, message.text))
+        await db.commit()
+    await state.clear()
+    await message.answer("✅ Дело добавлено в списочек 💕")
+
+@dp.callback_query(F.data.startswith("tododel_"))
+async def todo_del(callback: types.CallbackQuery):
+    tid = int(callback.data.split("_")[1])
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("DELETE FROM tasks WHERE id=?", (tid,))
+        await db.commit()
+    await callback.answer("Удалено 🗑")
+    await todo_list_msg_refresh(callback)
+
+# ---------- «МИЛЫЙ» РАЗГОВОР ----------
+@dp.message()
+async def chat_chat(message: types.Message):
+    t = message.text or ""
+    if t.startswith("/"):
+        await message.answer("Хм, такой команды пока нет. Напиши /start ✨")
+        return
+    if "спасибо" in t.lower() or "спс" in t.lower():
+        addr = random.choice(THANKS_ADDRS)
+        await message.answer(f"Ой, спасибочки 💕✨… и тебе спасибо, {addr}. Рада всегда помочь 🌸")
+        try:
+            await message.answer_photo(photo=random.choice(CUTE_IMAGES), caption="Для тебя ✨")
+        except Exception:
+            pass
+        return
+    await message.answer(random.choice(FALLBACK_PHRASES))
+
+# ---------- СЕРВЕР ----------
 async def web_server():
     app = web.Application()
-    app.router.add_get('/', lambda r: web.Response(text="Bot is running!"))
+    app.router.add_get("/", lambda r: web.Response(text="Bot is running 💕"))
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
 
 async def main():
