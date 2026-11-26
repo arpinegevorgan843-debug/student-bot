@@ -13,20 +13,21 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Меню
-def get_main_menu():builder = InlineKeyboardBuilder()
-builder.button(text="📅 Расписание на сегодня", callback_data="schedule_today")
-builder.button(text="🗓 Расписание на неделю", callback_data="schedule_week")
-builder.button(text="📚 Мои домашние задания", callback_data="homework")
-builder.button(text="✅ Список дел (To-Do)", callback_data="todo")
-builder.button(text="💰 Мои финансы", callback_data="finance")
-builder.button(text="⚙️ Настройки расписания", callback_data="settings")
-builder.adjust(1)
-return builder.as_markup()
+def get_main_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📅 Расписание на сегодня", callback_data="schedule_today")
+    builder.button(text="🗓 Расписание на неделю", callback_data="schedule_week")
+    builder.button(text="📚 Мои домашние задания", callback_data="homework")
+    builder.button(text="✅ Список дел (To-Do)", callback_data="todo")
+    builder.button(text="💰 Мои финансы", callback_data="finance")
+    builder.button(text="⚙️ Настройки расписания", callback_data="settings")
+    builder.adjust(1)
+    return builder.as_markup()
 
 def get_back_menu():
-builder = InlineKeyboardBuilder()
-builder.button(text="◀️ Назад", callback_data="back_to_main")
-return builder.as_markup()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Назад", callback_data="back_to_main")
+    return builder.as_markup()
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
