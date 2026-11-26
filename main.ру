@@ -35,6 +35,8 @@ async def cmd_start(message: types.Message, state:FSMContext):
     await message.answer(
         f"Привет, {message.from_user.first_name}! 👋\nЯ твой умный студенческий ассистент.\nВыбери нужный раздел:",
         reply_markup=get_main_menu()
+    )
+
 @dp.callback_query(F.data.in_({"schedule_today", "schedule_week", "homework", "todo", "finance", "settings"}))
 
 async def handle_menu(callback: types.CallbackQuery):
