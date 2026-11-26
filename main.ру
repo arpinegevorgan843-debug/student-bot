@@ -112,7 +112,7 @@ async def list_hw(callback: types.CallbackQuery):
     async with aiosqlite.connect("db.sqlite") as db:
         async with db.execute("SELECT id, task FROM homework WHERE user_id = ? AND done = 0", (callback.from_user.id,)) as cursor:
             rows = await cursor.fetchall()
-            if not rows:
+    if not rows:
         await callback.message.edit_text("У тебя нет активных ДЗ! 🎉", reply_markup=get_hw_menu())
     else:
         builder = InlineKeyboardBuilder()
