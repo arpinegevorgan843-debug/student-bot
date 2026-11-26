@@ -32,7 +32,7 @@ class BotStates(StatesGroup):
     waiting_for_teacher = State()
 
 async def init_db():
-    async with aiosqlite.connect("db.sqlite") as db:
+    async with aiosqlite.connect("db.sqlite") as db:
         await db.execute("""CREATE TABLE IF NOT EXISTS schedule 
             (id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, week_type TEXT, time TEXT, subject TEXT, lesson_type TEXT, room TEXT, teacher TEXT, note TEXT)""")
         await db.execute("CREATE TABLE IF NOT EXISTS homework (id INTEGER PRIMARY KEY, user_id INTEGER, subject TEXT, task TEXT, photo_id TEXT, done INTEGER DEFAULT 0)")
