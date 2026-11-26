@@ -1,84 +1,248 @@
 import asyncio
 import logging
+import aiosqlite
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiohttp import web
 
+# ВСТАВЬ СЮДА СВОЙ ТОКЕН!
 BOT_TOKEN = "9257823958:AAEGecZSkjljfY1NdAdIkaQNHGcXrkSuOow"
 
 logging.basicConfig(level=logging.INFO)
-
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Меню
+# Состояния для ввода текста
+class BotStates(StatesGroup):
+    waiting_for_hw = State()
+    waiting_for_todo = State()
+    waiting_for_finance = State()
+
+# --- БАЗА ДАННЫХ ---
+async def init_db():
+    async with aiosqlite.connect("db.sqlite") as db:
+        await db.execute("""CREATE TABLE IF NOT EXISTS homework 
+            (id INTEGER PRIMARY KEY, user_id INTEGER, subject TEXT, task TEXT, done INTEGER DEFAULT 0)""")
+        await db.execute("""CREATE TABLE IF NOT EXISTS todos 
+            (id INTEGER PRIMARY KEY, user_id INTEGER, task TEXT, done INTEGER DEFAULT 0)""")
+        await db.execute("""CREATE TABLE IF NOT EXISTS finance 
+            (id INTEGER PRIMARY KEY, user_id INTEGER, type TEXT, amount REAL, note TEXT)""")
+        await db.commit()
+
+# --- КЛАВИАТУРЫ ---
 def get_main_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📅 Расписание на сегодня", callback_data="schedule_today")
-    builder.button(text="🗓 Расписание на неделю", callback_data="schedule_week")
-    builder.button(text="📚 Мои домашние задания", callback_data="homework")
-    builder.button(text="✅ Список дел (To-Do)", callback_data="todo")
-    builder.button(text="💰 Мои финансы", callback_data="finance")
-    builder.button(text="⚙️ Настройки расписания", callback_data="settings")
+    builder.button(text="📅 Расписание", callback_data="schedule")
+    builder.button(text="📚 Домашние задания", callback_data="hw_menu")
+    builder.button(text="✅ Список дел (To-Do)", callback_data="todo_menu")
+    builder.button(text="💰 Мои финансы", callback_data="finance_menu")
+    builder.adjust(1) # Кнопки в один аккуратный столбик
+    return builder.as_markup()
+
+def get_back_btn():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    return builder.as_markup()
+
+def get_hw_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Добавить ДЗ", callback_data="add_hw")
+    builder.button(text="📋 Список ДЗ", callback_data="list_hw")
+    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
     builder.adjust(1)
     return builder.as_markup()
 
-def get_back_menu():
+def get_todo_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="◀️ Назад", callback_data="back_to_main")
+    builder.button(text="➕ Добавить дело", callback_data="add_todo")
+    builder.button(text="📋 Список дел", callback_data="list_todo")
+    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    builder.adjust(1)
     return builder.as_markup()
 
+def get_finance_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Добавить расход/доход", callback_data="add_finance")
+    builder.button(text="📊 Статистика", callback_data="stats_finance")
+    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+# --- ГЛАВНОЕ МЕНЮ ---
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message, state:FSMContext):
+async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer(
-        f"Привет, {message.from_user.first_name}! 👋\nЯ твой умный студенческий ассистент.\nВыбери нужный раздел:",
+    await message.answer( 
+          f"Привет, {message.from_user.first_name}! 👋\nЯ твой умный студенческий ассистент.\nВыбери нужный раздел:",
         reply_markup=get_main_menu()
     )
 
-@dp.callback_query(F.data.in_({"schedule_today", "schedule_week", "homework", "todo", "finance", "settings"}))
-
-async def handle_menu(callback: types.CallbackQuery):
-    await callback.answer()
-
-    texts = {
-            "schedule_today": "📅 **Расписание на сегодня**\n(Здесь будет расписание)",
-            "schedule_week": "🗓 **Расписание на неделю**\n(Здесь будет список пар)",
-            "homework": "📚 **Домашние задания**\n(Здесь будет список ДЗ)",
-            "todo": "✅ **Список дел**\n(Здесь будут твои задачи)",
-            "finance": "💰 **Финансы**\n(Здесь будет бюджет)",
-            "settings": "⚙️ **Настройки**\n(Здесь можно добавить или удалить пару)"
-}
-
-    await callback.message.edit_text(
-            text=texts[callback.data],
-            reply_markup=get_back_menu(),
-            parse_mode="Markdown"
-)
-
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
     await state.clear()
-    await callback.message.edit_text(
-    "🏠 **Главное меню**\nВыбери нужный раздел:",
-    reply_markup=get_main_menu(),
-    parse_mode="Markdown"
-)
+    await callback.message.edit_text("🏠 **Главное меню**\nВыбери нужный раздел:", reply_markup=get_main_menu(), parse_mode="Markdown")
+    await callback.answer()
 
-from aiohttp import web
+# --- ДОМАШНИЕ ЗАДАНИЯ ---
+@dp.callback_query(F.data == "hw_menu")
+async def hw_menu(callback: types.CallbackQuery):
+    await callback.message.edit_text("📚 **Домашние задания**\nЧто будем делать?", reply_markup=get_hw_menu(), parse_mode="Markdown")
+    await callback.answer()
 
+@dp.callback_query(F.data == "add_hw")
+async def add_hw_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Напиши предмет и задание (например: 'Математика задача 5'):", reply_markup=get_back_btn())
+    await state.set_state(BotStates.waiting_for_hw)
+    await callback.answer()
+
+@dp.message(BotStates.waiting_for_hw)
+async def add_hw_save(message: types.Message, state: FSMContext):
+    async with aiosqlite.connect("db.sqlite") as db:
+        await db.execute("INSERT INTO homework (user_id, task) VALUES (?, ?)", (message.from_user.id, message.text))
+        await db.commit()
+    await state.clear()
+    await message.answer("✅ ДЗ добавлено в список!", reply_markup=get_hw_menu())
+
+@dp.callback_query(F.data == "list_hw")
+async def list_hw(callback: types.CallbackQuery):
+    async with aiosqlite.connect("db.sqlite") as db:
+        async with db.execute("SELECT id, task FROM homework WHERE user_id = ? AND done = 0", (callback.from_user.id,)) as cursor:
+            rows = await cursor.fetchall()
+            if not rows:
+        await callback.message.edit_text("У тебя нет активных ДЗ! 🎉", reply_markup=get_hw_menu())
+    else:
+        builder = InlineKeyboardBuilder()
+        text = "📋 **Твои ДЗ:**\n\n"
+        for r in rows:
+            text += f"• {r[1]}\n"
+            builder.button(text=f"✅ Выполнено: {r[1][:15]}...", callback_data=f"done_hw_{r[0]}")
+        builder.button(text="◀️ Назад", callback_data="hw_menu")
+        builder.adjust(1)
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("done_hw_"))
+async def done_hw(callback: types.CallbackQuery):
+    hw_id = callback.data.split("_")[2]
+    async with aiosqlite.connect("db.sqlite") as db:
+        await db.execute("UPDATE homework SET done = 1 WHERE id = ?", (hw_id,))
+        await db.commit()
+    await callback.answer("Выполнено! ✅")
+    await list_hw(callback)
+
+# --- TO-DO ---
+@dp.callback_query(F.data == "todo_menu")
+async def todo_menu(callback: types.CallbackQuery):
+    await callback.message.edit_text("✅ **Список дел**\nТвои задачи:", reply_markup=get_todo_menu(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data == "add_todo")
+async def add_todo_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Напиши дело (например: 'Купить хлеб'):", reply_markup=get_back_btn())
+    await state.set_state(BotStates.waiting_for_todo)
+    await callback.answer()
+
+@dp.message(BotStates.waiting_for_todo)
+async def add_todo_save(message: types.Message, state: FSMContext):
+async with aiosqlite.connect("db.sqlite") as db:
+    await db.execute("INSERT INTO todos (user_id, task) VALUES (?, ?)", (message.from_user.id, message.text))
+    await db.commit()
+    await state.clear()
+    await message.answer("✅ Дело добавлено в список!", reply_markup=get_todo_menu())
+
+@dp.callback_query(F.data == "list_todo")
+async def list_todo(callback: types.CallbackQuery):
+    async with aiosqlite.connect("db.sqlite") as db:
+        async with db.execute("SELECT id, task FROM todos WHERE user_id = ? AND done = 0", (callback.from_user.id,)) as cursor:
+            rows = await cursor.fetchall()
+    
+    if not rows:
+        await callback.message.edit_text("Список дел пуст!", reply_markup=get_todo_menu())
+    else:
+        builder = InlineKeyboardBuilder()
+        text = "📋 **Твои дела:**\n\n"
+        for r in rows:
+            text += f"• {r[1]}\n"
+            builder.button(text=f"✅ Выполнено: {r[1][:15]}...", callback_data=f"done_todo_{r[0]}")
+        builder.button(text="◀️ Назад", callback_data="todo_menu")
+        builder.adjust(1)
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
+@dp.callback_query(F.data.startswith("done_todo_"))
+async def done_todo(callback: types.CallbackQuery):
+    todo_id = callback.data.split("_")[2]
+    async with aiosqlite.connect("db.sqlite") as db:
+        await db.execute("UPDATE todos SET done = 1 WHERE id = ?", (todo_id,))
+        await db.commit()
+    await callback.answer("Выполнено! ✅")
+    await list_todo(callback)
+
+# --- ФИНАНСЫ ---
+@dp.callback_query(F.data == "finance_menu")
+async def finance_menu(callback: types.CallbackQuery):
+    await callback.message.edit_text("💰 **Твои финансы**\nЗдесь ты можешь вести бюджет:", reply_markup=get_finance_menu(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data == "add_finance")
+async def add_finance_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Напиши сумму и описание (например: 'кофе 250' или '+1500 репетитор'):", reply_markup=get_back_btn())
+    await state.set_state(BotStates.waiting_for_finance)
+    await callback.answer()
+
+@dp.message(BotStates.waiting_for_finance)
+async def add_finance_save(message: types.Message, state: FSMContext):
+    text = message.text.lower()
+    is_income = "+" in text
+    amount = ''.join(filter(str.isdigit, text))
+    
+    if not amount:
+        await message.answer("Не понял сумму. Напиши, например: 'кофе 250'")
+        return
+        
+    async with aiosqlite.connect("db.sqlite") as db:
+        await db.execute("INSERT INTO finance (user_id, type, amount, note) VALUES (?, ?, ?, ?)", 
+                         (message.from_user.id, 'income' if is_income else 'expense', float(amount), text))
+        await db.commit()
+    await state.clear()
+    await message.answer("✅ Записано в бюджет!", reply_markup=get_finance_menu())
+
+@dp.callback_query(F.data == "stats_finance")
+async def stats_finance(callback: types.CallbackQuery):
+    async with aiosqlite.connect("db.sqlite") as db: 
+    async with db.execute("SELECT type, SUM(amount) FROM finance WHERE user_id = ? GROUP BY type", (callback.from_user.id,)) as cursor:
+            rows = await cursor.fetchall()
+            
+    income = 0
+    expense = 0
+    for r in rows:
+        if r[0] == 'income': income = r[1]
+        if r[0] == 'expense': expense = r[1]
+        
+    text = f"📊 **Твой бюджет:**\n\n🟢 Доходы: {income} руб.\n🔴 Расходы: {expense} руб.\n\n💰 Баланс: {income - expense} руб."
+    await callback.message.edit_text(text, reply_markup=get_finance_menu(), parse_mode="Markdown")
+    await callback.answer()
+
+# --- РАСПИСАНИЕ (Заглушка) ---
+@dp.callback_query(F.data == "schedule")
+async def schedule(callback: types.CallbackQuery):
+    text = "📅 **Расписание на сегодня**\n\n09:00 - ИОГП (Семинар)\n10:40 - Математика (Лекция)\n\n(Скоро добавим редактирование!)"
+    await callback.message.edit_text(text, reply_markup=get_back_btn(), parse_mode="Markdown")
+    await callback.answer()
+# --- СЕРВЕР ДЛЯ RENDER (чтобы не падал) ---
 async def web_server():
     app = web.Application()
-    app.router.add_get('/', lambda r: 
-web.Response(text="Bot is running!"))
+    app.router.add_get('/', lambda r: web.Response(text="Bot is running!"))
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
     await site.start()
 
 async def main():
+    await init_db()
     asyncio.create_task(web_server())
     await dp.start_polling(bot)
 
