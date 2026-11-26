@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import aiosqlite
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
@@ -18,7 +19,7 @@ dp = Dispatcher()
 # Функция для определения четности недели
 def get_week_type(date_obj):
     week_number = date_obj.isocalendar()[1]
-    return "Четная" if week_number % 2== 0 else "Нечетная"
+    return "Четная" if week_number % 2 == 0 else "Нечетная"
 
 class BotStates(StatesGroup):
     waiting_for_hw_text = State()
@@ -33,274 +34,274 @@ class BotStates(StatesGroup):
 
 async def init_db():
     async with aiosqlite.connect("db.sqlite") as db:
-        await db.execute("""CREATE TABLE IF NOT EXISTS schedule 
-            (id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, week_type TEXT, time TEXT, subject TEXT, lesson_type TEXT, room TEXT, teacher TEXT, note TEXT)""")
-        await db.execute("CREATE TABLE IF NOT EXISTS homework (id INTEGER PRIMARY KEY, user_id INTEGER, subject TEXT, task TEXT, photo_id TEXT, done INTEGER DEFAULT 0)")
-        await db.commit()
+        await db.execute("""CREATE TABLE IF NOT EXISTS schedule
+            (id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, week_type TEXT, time TEXT, subject TEXT, lesson_type TEXT, room TEXT, teacher TEXT, note TEXT)""")
+        await db.execute("CREATE TABLE IF NOT EXISTS homework (id INTEGER PRIMARY KEY, user_id INTEGER, subject TEXT, task TEXT, photo_id TEXT, done INTEGER DEFAULT 0)")
+        await db.commit()
 
 def get_main_menu():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="📅 Расписание на сегодня", callback_data="sched_today")
-    builder.button(text="📅 Расписание на завтра", callback_data="sched_tomorrow")
-    builder.button(text="🗓 Расписание на неделю", callback_data="sched_week")
-    builder.button(text="➕ Добавить ДЗ", callback_data="add_hw")
-    builder.button(text="⚙️ Настроить расписание", callback_data="setup_schedule")
-    builder.adjust(1)
-    return builder.as_markup()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📅 Расписание на сегодня", callback_data="sched_today")
+    builder.button(text="📅 Расписание на завтра", callback_data="sched_tomorrow")
+    builder.button(text="🗓 Расписание на неделю", callback_data="sched_week")
+    builder.button(text="➕ Добавить ДЗ", callback_data="add_hw")
+    builder.button(text="⚙️ Настроить расписание", callback_data="setup_schedule")
+    builder.adjust(1)
+    return builder.as_markup()
 
 def get_back_btn():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
-    return builder.as_markup()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    return builder.as_markup()
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer(f"Привет, {message.from_user.first_name}! 👋\nВыбери раздел:", reply_markup=get_main_menu())
+    await state.clear()
+    await message.answer(f"Привет, {message.from_user.first_name}! 👋\nВыбери раздел:", reply_markup=get_main_menu())
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("🏠 Главное меню:", reply_markup=get_main_menu())
-    await callback.answer()
+    await state.clear()
+    await callback.message.edit_text("🏠 Главное меню:", reply_markup=get_main_menu())
+    await callback.answer()
 
 # --- РАСПИСАНИЕ (ОБЩАЯ ФУНКЦИЯ) ---
 async def show_schedule_for_day(callback: types.CallbackQuery, target_date: datetime):
-    days_ru = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
-    day_name = days_ru[target_date.weekday()]
-    week_type = get_week_type(target_date)
-    
-    async with aiosqlite.connect("db.sqlite") as db:
-        async with db.execute("SELECT id, time, subject, lesson_type, room, teacher, note FROM schedule WHERE user_id = ? AND day = ? AND (week_type = ? OR week_type = 'Каждую') ORDER BY time", (callback.from_user.id, day_name, week_type)) as cursor:
-            lessons = await cursor.fetchall()
-        async with db.execute("SELECT subject, task, photo_id FROM homework WHERE user_id = ? AND done = 0", (callback.from_user.id,)) as cursor:
-            all_hws = await cursor.fetchall()
-    
-    header = f"📅 **{day_name} ({week_type} неделя)**\n\n"
-    if not lessons:
-        await callback.message.edit_text(header + "Пар нет! 🎉", reply_markup=get_back_btn(), parse_mode="Markdown")
-        return
+    days_ru = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+    day_name = days_ru[target_date.weekday()]
+    week_type = get_week_type(target_date)
 
-    text = header
-    has_photos = False
-    for l in lessons:
-        lesson_id, time, subj, l_type, room, teacher, note = l
-        text += f"⏰ {time} | 📖 {subj}\n"
-        text += f"🎓 {l_type}"
-        if room: text += f" | 🚪 {room}"
-        if teacher: text += f" | 👨‍🏫 {teacher}"
-        text += "\n"
-        
-        if "семинар" in l_type.lower():
-            for hw in all_hws:
-                hw_subj, hw_task, hw_photo = hw
-                if hw_subj.lower() in subj.lower() or subj.lower() in hw_subj.lower():
-                    text += f"   📝 ДЗ: {hw_task}\n"
-                    if hw_photo:
-                        text += f"   🖼 [Фото прикреплено]\n"
-                        has_photos = True
-        if note:
-            text += f"   🗒 Заметка: {note}\n"
-        text += "\n"
-        
-    builder = InlineKeyboardBuilder()
-    for l in lessons:
-        builder.button(text=f"🗒 Заметка к {l[2]}", callback_data=f"addnote_{l[0]}")
-    if has_photos:
-        builder.button(text="🖼 Посмотреть фото к ДЗ", callback_data="view_hw_photos")
-    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
-    builder.adjust(1)
-    
-    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    async with aiosqlite.connect("db.sqlite") as db:
+        async with db.execute("SELECT id, time, subject, lesson_type, room, teacher, note FROM schedule WHERE user_id = ? AND day = ? AND (week_type = ? OR week_type = 'Каждую') ORDER BY time", (callback.from_user.id, day_name, week_type)) as cursor:
+            lessons = await cursor.fetchall()
+        async with db.execute("SELECT subject, task, photo_id FROM homework WHERE user_id = ? AND done = 0", (callback.from_user.id,)) as cursor:
+            all_hws = await cursor.fetchall()
+
+    header = f"📅 **{day_name} ({week_type} неделя)**\n\n"
+    if not lessons:
+        await callback.message.edit_text(header + "Пар нет! 🎉", reply_markup=get_back_btn(), parse_mode="Markdown")
+        return
+
+    text = header
+    has_photos = False
+    for l in lessons:
+        lesson_id, time, subj, l_type, room, teacher, note = l
+        text += f"⏰ {time} | 📖 {subj}\n"
+        text += f"🎓 {l_type}"
+        if room: text += f" | 🚪 {room}"
+        if teacher: text += f" | 👨‍🏫 {teacher}"
+        text += "\n"
+
+        if "семинар" in l_type.lower():
+            for hw in all_hws:
+                hw_subj, hw_task, hw_photo = hw
+                if hw_subj.lower() in subj.lower() or subj.lower() in hw_subj.lower():
+                    text += f"   📝 ДЗ: {hw_task}\n"
+                    if hw_photo:
+                        text += f"   🖼 [Фото прикреплено]\n"
+                        has_photos = True
+        if note:
+            text += f"   🗒 Заметка: {note}\n"
+        text += "\n"
+
+    builder = InlineKeyboardBuilder()
+    for l in lessons:
+        builder.button(text=f"🗒 Заметка к {l[2]}", callback_data=f"addnote_{l[0]}")
+    if has_photos:
+        builder.button(text="🖼 Посмотреть фото к ДЗ", callback_data="view_hw_photos")
+    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    builder.adjust(1)
+
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "sched_today")
 async def sched_today(callback: types.CallbackQuery):
-    await show_schedule_for_day(callback, datetime.now())
-    await callback.answer()
+    await show_schedule_for_day(callback, datetime.now())
+    await callback.answer()
 
 @dp.callback_query(F.data == "sched_tomorrow")
 async def sched_tomorrow(callback: types.CallbackQuery):
-    await show_schedule_for_day(callback, datetime.now() + timedelta(days=1))
-    await callback.answer()
+    await show_schedule_for_day(callback, datetime.now() + timedelta(days=1))
+    await callback.answer()
 
 @dp.callback_query(F.data == "sched_week")
 async def sched_week(callback: types.CallbackQuery):
-    days_ru = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
-    today = datetime.now()
-    monday = today - timedelta(days=today.weekday())
-    week_type = get_week_type(monday)
-    
-    text = f"🗓 **Расписание на неделю ({week_type})**\n\n"
-    async with aiosqlite.connect("db.sqlite") as db:
-        for i, day_name in enumerate(days_ru):
-            async with db.execute("SELECT time, subject, lesson_type, room FROM schedule WHERE user_id = ? AND day = ? AND (week_type = ? OR week_type = 'Каждую') ORDER BY time", (callback.from_user.id, day_name, week_type)) as cursor:
-                lessons = await cursor.fetchall()
-            
-            if lessons:
-                text += f"**{day_name}:**\n"
-                for l in lessons:
-                    text += f"  {l[0]} - {l[1]} ({l[2]})"
-                    if l[3]: text += f", ауд. {l[3]}"
-                    text += "\n"
-                text += "\n"
-                
-    if text == f"🗓 **Расписание на неделю ({week_type})**\n\n":
-        text += "На эту неделю пар не задано."
-        
-    await callback.message.edit_text(text, reply_markup=get_back_btn(), parse_mode="Markdown")
-    await callback.answer()
+    days_ru = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+    today = datetime.now()
+    monday = today - timedelta(days=today.weekday())
+    week_type = get_week_type(monday)
+
+    text = f"🗓 **Расписание на неделю ({week_type})**\n\n"
+    async with aiosqlite.connect("db.sqlite") as db:
+        for i, day_name in enumerate(days_ru):
+            async with db.execute("SELECT time, subject, lesson_type, room FROM schedule WHERE user_id = ? AND day = ? AND (week_type = ? OR week_type = 'Каждую') ORDER BY time", (callback.from_user.id, day_name, week_type)) as cursor:
+                lessons = await cursor.fetchall()
+
+            if lessons:
+                text += f"**{day_name}:**\n"
+                for l in lessons:
+                    text += f"  {l[0]} - {l[1]} ({l[2]})"
+                    if l[3]: text += f", ауд. {l[3]}"
+                    text += "\n"
+                text += "\n"
+
+    if text == f"🗓 **Расписание на неделю ({week_type})**\n\n":
+        text += "На эту неделю пар не задано."
+
+    await callback.message.edit_text(text, reply_markup=get_back_btn(), parse_mode="Markdown")
+    await callback.answer()
 
 @dp.callback_query(F.data == "view_hw_photos")
 async def view_hw_photos(callback: types.CallbackQuery):
-    async with aiosqlite.connect("db.sqlite") as db:
-        async with db.execute("SELECT task, photo_id FROM homework WHERE user_id = ? AND done = 0 AND photo_id IS NOT NULL", (callback.from_user.id,)) as cursor:
-            rows = await cursor.fetchall()
-    await callback.message.edit_text("Загружаю фото...", reply_markup=get_back_btn())
-    for task, photo in rows:
-        await callback.message.answer_photo(photo=photo, caption=f"📝 ДЗ: {task}")
-    await callback.answer()
+    async with aiosqlite.connect("db.sqlite") as db:
+        async with db.execute("SELECT task, photo_id FROM homework WHERE user_id = ? AND done = 0 AND photo_id IS NOT NULL", (callback.from_user.id,)) as cursor:
+            rows = await cursor.fetchall()
+    await callback.message.edit_text("Загружаю фото...", reply_markup=get_back_btn())
+    for task, photo in rows:
+        await callback.message.answer_photo(photo=photo, caption=f"📝 ДЗ: {task}")
+    await callback.answer()
 
 # --- ДОБАВЛЕНИЕ ДЗ (УМНЫЙ ПОИСК) ---
 @dp.callback_query(F.data == "add_hw")
 async def add_hw_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Напиши предмет и задание (например: 'История выучить Романовых'):", reply_markup=get_back_btn())
-    await state.set_state(BotStates.waiting_for_hw_text)
-    await callback.answer()
+    await callback.message.edit_text("Напиши предмет и задание (например: 'История выучить Романовых'):", reply_markup=get_back_btn())
+    await state.set_state(BotStates.waiting_for_hw_text)
+    await callback.answer()
 
 @dp.message(BotStates.waiting_for_hw_text)
 async def add_hw_text(message: types.Message, state: FSMContext):
-    await state.update_data(hw_text=message.text)
-    await message.answer("✅ Текст записан! Теперь пришли **фото** к этому ДЗ (или напиши 'Нет'):", parse_mode="Markdown")
-    await state.set_state(BotStates.waiting_for_hw_photo)
+    await state.update_data(hw_text=message.text)
+    await message.answer("✅ Текст записан! Теперь пришли **фото** к этому ДЗ (или напиши 'Нет'):", parse_mode="Markdown")
+    await state.set_state(BotStates.waiting_for_hw_photo)
 
 @dp.message(BotStates.waiting_for_hw_photo, F.photo)
 async def add_hw_photo(message: types.Message, state: FSMContext):
-    await save_hw_final(message, state, message.photo[-1].file_id)
+    await save_hw_final(message, state, message.photo[-1].file_id)
 
 @dp.message(BotStates.waiting_for_hw_photo)
 async def add_hw_no_photo(message: types.Message, state: FSMContext):
-    await save_hw_final(message, state, None)
+    await save_hw_final(message, state, None)
 
 async def save_hw_final(message: types.Message, state: FSMContext, photo_id):
-    data = await state.get_data()
-    hw_text = data['hw_text']
-    subject_guess = hw_text.split()[0] if hw_text else "Общее"
-    
-    async with aiosqlite.connect("db.sqlite") as db:
-        # Ищем семинар
-        async with db.execute("SELECT subject, lesson_type FROM schedule WHERE user_id = ? AND subject LIKE ?", (message.from_user.id, f"%{subject_guess}%")) as cursor:
-            lessons = await cursor.fetchall()
-            
-    seminar = next((l for l in lessons if "семинар" in l[1].lower()), None)
-            
-    if not seminar:
-        await message.answer("❌ Семинар по этому предмету не найден. ДЗ не сохранено.", reply_markup=get_main_menu())
-    else:
-        exact_subject = seminar[0]
-        async with aiosqlite.connect("db.sqlite") as db:
-            await db.execute("INSERT INTO homework (user_id, subject, task, photo_id) VALUES (?, ?, ?, ?)", (message.from_user.id, exact_subject, hw_text, photo_id))
-            await db.commit()
-        await message.answer(f"✅ ДЗ добавлено к семинару *{exact_subject}*!", reply_markup=get_main_menu(), parse_mode="Markdown")
-    await state.clear()
+    data = await state.get_data()
+    hw_text = data['hw_text']
+    subject_guess = hw_text.split()[0] if hw_text else "Общее"
+
+    async with aiosqlite.connect("db.sqlite") as db:
+        # Ищем семинар
+        async with db.execute("SELECT subject, lesson_type FROM schedule WHERE user_id = ? AND subject LIKE ?", (message.from_user.id, f"%{subject_guess}%")) as cursor:
+            lessons = await cursor.fetchall()
+
+    seminar = next((l for l in lessons if "семинар" in l[1].lower()), None)
+
+    if not seminar:
+        await message.answer("❌ Семинар по этому предмету не найден. ДЗ не сохранено.", reply_markup=get_main_menu())
+    else:
+        exact_subject = seminar[0]
+        async with aiosqlite.connect("db.sqlite") as db:
+            await db.execute("INSERT INTO homework (user_id, subject, task, photo_id) VALUES (?, ?, ?, ?)", (message.from_user.id, exact_subject, hw_text, photo_id))
+            await db.commit()
+        await message.answer(f"✅ ДЗ добавлено к семинару *{exact_subject}*!", reply_markup=get_main_menu(), parse_mode="Markdown")
+    await state.clear()
 
 # --- ЗАМЕТКИ ---
 @dp.callback_query(F.data.startswith("addnote_"))
 async def add_note(callback: types.CallbackQuery, state: FSMContext):
-    lesson_id = callback.data.split("_")[1]
-    await state.update_data(note_id=lesson_id)
-    await callback.message.edit_text("Напиши текст заметки:", reply_markup=get_back_btn())
-    await state.set_state(BotStates.waiting_for_note)
-    await callback.answer()
+    lesson_id = callback.data.split("_")[1]
+    await state.update_data(note_id=lesson_id)
+    await callback.message.edit_text("Напиши текст заметки:", reply_markup=get_back_btn())
+    await state.set_state(BotStates.waiting_for_note)
+    await callback.answer()
 
 @dp.message(BotStates.waiting_for_note)
 async def save_note(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    async with aiosqlite.connect("db.sqlite") as db:
-        await db.execute("UPDATE schedule SET note = ? WHERE id = ?", (message.text, data['note_id']))
-        await db.commit()
-    await state.clear()
-    await message.answer("✅ Заметка сохранена!", reply_markup=get_main_menu())
+    data = await state.get_data()
+    async with aiosqlite.connect("db.sqlite") as db:
+        await db.execute("UPDATE schedule SET note = ? WHERE id = ?", (message.text, data['note_id']))
+        await db.commit()
+    await state.clear()
+    await message.answer("✅ Заметка сохранена!", reply_markup=get_main_menu())
 
 # --- НАСТРОЙКА РАСПИСАНИЯ (С ЧЕТНОСТЬЮ) ---
 @dp.callback_query(F.data == "setup_schedule")
 async def setup_schedule(callback: types.CallbackQuery):
-    builder = InlineKeyboardBuilder()
-    days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    for i, d in enumerate(days):
-        builder.button(text=d, callback_data=f"add_day_{i}")
-    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
-    builder.adjust(3, 3, 1)
-    await callback.message.edit_text("Выбери день недели:", reply_markup=builder.as_markup())
-    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    for i, d in enumerate(days):
+        builder.button(text=d, callback_data=f"add_day_{i}")
+    builder.button(text="◀️ Назад в меню", callback_data="back_to_main")
+    builder.adjust(3, 3, 1)
+    await callback.message.edit_text("Выбери день недели:", reply_markup=builder.as_markup())
+    await callback.answer()
 
 @dp.callback_query(F.data.startswith("add_day_"))
 async def add_day(callback: types.CallbackQuery, state: FSMContext):
-    days_full = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
-    day_index = int(callback.data.split("_")[2])
-    await state.update_data(day_name=days_full[day_index])
-    await callback.message.edit_text(f"День: **{days_full[day_index]}**.\nНапиши название предмета:", reply_markup=get_back_btn(), parse_mode="Markdown")
-    await state.set_state(BotStates.waiting_for_subj_name)
-    await callback.answer()
+    days_full = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+    day_index = int(callback.data.split("_")[2])
+    await state.update_data(day_name=days_full[day_index])
+    await callback.message.edit_text(f"День: **{days_full[day_index]}**.\nНапиши название предмета:", reply_markup=get_back_btn(), parse_mode="Markdown")
+    await state.set_state(BotStates.waiting_for_subj_name)
+    await callback.answer()
 
 @dp.message(BotStates.waiting_for_subj_name)
 async def proc_subj(message: types.Message, state: FSMContext):
-    await state.update_data(subject=message.text)
-    await message.answer("Тип пары (Лекция/Семинар):")
-    await state.set_state(BotStates.waiting_for_type)
+    await state.update_data(subject=message.text)
+    await message.answer("Тип пары (Лекция/Семинар):")
+    await state.set_state(BotStates.waiting_for_type)
 
 @dp.message(BotStates.waiting_for_type)
 async def proc_type(message: types.Message, state: FSMContext):
-    await state.update_data(lesson_type=message.text)
-    await message.answer("На какой неделе? (Напиши: Четная, Нечетная или Каждую):")
-    await state.set_state(BotStates.waiting_for_week)
+    await state.update_data(lesson_type=message.text)
+    await message.answer("На какой неделе? (Напиши: Четная, Нечетная или Каждую):")
+    await state.set_state(BotStates.waiting_for_week)
 
 @dp.message(BotStates.waiting_for_week)
 async def proc_week(message: types.Message, state: FSMContext):
-    await state.update_data(week_type=message.text)
-    await message.answer("Время (например: 09:00 - 10:30):")
-    await state.set_state(BotStates.waiting_for_time)
+    await state.update_data(week_type=message.text)
+    await message.answer("Время (например: 09:00 - 10:30):")
+    await state.set_state(BotStates.waiting_for_time)
 
 @dp.message(BotStates.waiting_for_time)
 async def proc_time(message: types.Message, state: FSMContext):
-    await state.update_data(time=message.text)
-    await message.answer("Аудитория (или '-'):")
-    await state.set_state(BotStates.waiting_for_room)
+    await state.update_data(time=message.text)
+    await message.answer("Аудитория (или '-'):")
+    await state.set_state(BotStates.waiting_for_room)
 
 @dp.message(BotStates.waiting_for_room)
 async def proc_room(message: types.Message, state: FSMContext):
-    room = message.text if message.text != '-' else ''
-    await state.update_data(room=room)
-    await message.answer("ФИО преподавателя (или '-'):")
-    await state.set_state(BotStates.waiting_for_teacher)
+    room = message.text if message.text != '-' else ''
+    await state.update_data(room=room)
+    await message.answer("ФИО преподавателя (или '-'):")
+    await state.set_state(BotStates.waiting_for_teacher)
 
 @dp.message(BotStates.waiting_for_teacher)
 async def proc_teacher(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    teacher = message.text if message.text != '-' else ''
-    
-    async with aiosqlite.connect("db.sqlite") as db:
-        await db.execute("""INSERT INTO schedule 
-            (user_id, day, week_type, time, subject, lesson_type, room, teacher) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", 
-            (message.from_user.id, data['day_name'], data['week_type'], data['time'], data['subject'], data['lesson_type'], data['room'], teacher))
-        await db.commit()
-        
-    await state.clear()
-    await message.answer(f"✅ Пара **{data['subject']}** добавлена!", reply_markup=get_main_menu(), parse_mode="Markdown")
+    data = await state.get_data()
+    teacher = message.text if message.text != '-' else ''
+
+    async with aiosqlite.connect("db.sqlite") as db:
+        await db.execute("""INSERT INTO schedule
+            (user_id, day, week_type, time, subject, lesson_type, room, teacher)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (message.from_user.id, data['day_name'], data['week_type'], data['time'], data['subject'], data['lesson_type'], data['room'], teacher))
+        await db.commit()
+
+    await state.clear()
+    await message.answer(f"✅ Пара **{data['subject']}** добавлена!", reply_markup=get_main_menu(), parse_mode="Markdown")
 
 # --- СЕРВЕР ---
 async def web_server():
-    app = web.Application()
-    app.router.add_get('/', lambda r: web.Response(text="Bot is running!"))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
+    app = web.Application()
+    app.router.add_get('/', lambda r: web.Response(text="Bot is running!"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
 
 async def main():
-    await init_db()
-    asyncio.create_task(web_server())
-    await dp.start_polling(bot)
+    await init_db()
+    asyncio.create_task(web_server())
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main())
