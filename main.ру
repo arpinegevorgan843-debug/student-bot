@@ -30,22 +30,23 @@ def get_back_menu():
     return builder.as_markup()
 
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message, state: FSMContext):
-await state.clear()
-await message.answer(
-f"Привет, {message.from_user.first_name}! 👋\nЯ твой умный студенческий ассистент.\nВыбери нужный раздел:",
-reply_markup=get_main_menu()
-)@dp.callback_query(F.data.in_({"schedule_today", "schedule_week", "homework", "todo", "finance", "settings"}))
-async def handle_menu(callback: types.CallbackQuery):
-await callback.answer()
+async def cmd_start(message: types.Message, state:FSMContext):
+    await state.clear()
+    await message.answer(
+        f"Привет, {message.from_user.first_name}! 👋\nЯ твой умный студенческий ассистент.\nВыбери нужный раздел:",
+        reply_markup=get_main_menu()
+@dp.callback_query(F.data.in_({"schedule_today", "schedule_week", "homework", "todo", "finance", "settings"}))
 
-texts = {
-"schedule_today": "📅 **Расписание на сегодня**\n(Здесь будет расписание)",
-"schedule_week": "🗓 **Расписание на неделю**\n(Здесь будет список пар)",
-"homework": "📚 **Домашние задания**\n(Здесь будет список ДЗ)",
-"todo": "✅ **Список дел**\n(Здесь будут твои задачи)",
-"finance": "💰 **Финансы**\n(Здесь будет бюджет)",
-"settings": "⚙️ **Настройки**\n(Здесь можно добавить или удалить пару)"
+async def handle_menu(callback: types.CallbackQuery):
+    await callback.answer()
+
+    texts = {
+            "schedule_today": "📅 **Расписание на сегодня**\n(Здесь будет расписание)",
+            "schedule_week": "🗓 **Расписание на неделю**\n(Здесь будет список пар)",
+            "homework": "📚 **Домашние задания**\n(Здесь будет список ДЗ)",
+            "todo": "✅ **Список дел**\n(Здесь будут твои задачи)",
+            "finance": "💰 **Финансы**\n(Здесь будет бюджет)",
+            "settings": "⚙️ **Настройки**\n(Здесь можно добавить или удалить пару)"
 }
 
 await callback.message.edit_text(
@@ -56,11 +57,12 @@ parse_mode="Markdown"
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
-await callback.answer()
-await state.clear()await callback.message.edit_text(
-"🏠 **Главное меню**\nВыбери нужный раздел:",
-reply_markup=get_main_menu(),
-parse_mode="Markdown"
+    await callback.answer()
+    await state.clear()
+    await callback.message.edit_text(
+    "🏠 **Главное меню**\nВыбери нужный раздел:",
+    reply_markup=get_main_menu(),
+    parse_mode="Markdown"
 )
 
 from aiohttp import web
@@ -74,8 +76,8 @@ site = web.TCPSite(runner, '0.0.0.0', 8080)
 await site.start()
 
 async def main():
-asyncio.create_task(web_server())
-await dp.start_polling(bot)
+    asyncio.create_task(web_server())
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-asyncio.run(main())
+    asyncio.run(main())
