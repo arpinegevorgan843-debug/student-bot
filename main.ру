@@ -21,7 +21,7 @@ def get_week_type(date_obj):
     return "Четная" if week_number % 2== 0 else "Нечетная"
 
 class BotStates(StatesGroup):
-    waiting_for_hw_text = State()
+    waiting_for_hw_text = State()
     waiting_for_hw_photo = State()
     waiting_for_note = State()
     waiting_for_subj_name = State()
