@@ -16,7 +16,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiohttp import web
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "ВСТАВЬ_ТОКЕН")
+BOT_TOKEN = "9257823958:AAEGecZSkjljfY1NdAdIkaQNHGcXrkSuOow"
 DB = "db.sqlite"
 
 # ---------- ЯЗЫКИ ----------
