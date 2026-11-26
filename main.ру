@@ -17,7 +17,7 @@ dp = Dispatcher()
 
 # Функция для определения четности недели
 def get_week_type(date_obj):
-    week_number = date_obj.isocalendar()[1]
+    week_number = date_obj.isocalendar()[1]
     return "Четная" if week_number % 2 == 0 else "Нечетная"
 
 class BotStates(StatesGroup):
