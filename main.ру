@@ -28,7 +28,6 @@ DAYS_SHORT = {
     "ru": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"],
     "en": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
 }
-# В базе неделя хранится канонически по-русски; на экран переводим
 WD = {
     "Четная":   {"ru": "Четная",   "en": "Even"},
     "Нечетная": {"ru": "Нечетная", "en": "Odd"},
@@ -37,6 +36,54 @@ WD = {
 def wd(wt, lang):
     return WD.get(wt, {}).get(lang, wt)
 
+# ---------- ТВОЁ РАСПИСАНИЕ (вшито в бота) ----------
+# (день, неделя, время, предмет, тип, аудитория, преподаватель)
+SEED_DATA = [
+    # ----- ЧЁТНАЯ неделя -----
+    ("Понедельник", "Четная", "15:20 – 16:50", "Основы философии", "Семинар", "712", "Гишай А.В."),
+    ("Понедельник", "Четная", "17:00 – 18:30", "Иностранный язык в профессиональной деятельности", "Семинар", "403", "Горобец А.Ф."),
+    ("Вторник", "Четная", "08:00 – 09:30", "Теория государства и права", "Семинар", "603", "Матюшенко К.Б."),
+    ("Вторник", "Четная", "09:40 – 11:10", "История России", "Лекция", "617", "Микуленок А.А."),
+    ("Вторник", "Четная", "11:40 – 13:10", "Теория государства и права", "Лекция", "617", "Таранок Ю.В."),
+    ("Вторник", "Четная", "13:20 – 14:50", "Основы бережливого производства", "Лекция", "617", "Опришко Е.Л."),
+    ("Среда", "Четная", "08:00 – 09:30", "Основы финансовой грамотности", "Лекция", "617", "Веселова Н.Ю."),
+    ("Среда", "Четная", "09:40 – 11:10", "Административное право", "Лекция", "617", "ВАКАНСИЯ"),
+    ("Среда", "Четная", "11:40 – 13:10", "Русский язык и культура речи", "Семинар", "508", "Гарцуева О.А."),
+    ("Четверг", "Четная", "08:00 – 09:30", "Этика", "Семинар", "404", "Абельбеисов В.А."),
+    ("Четверг", "Четная", "09:40 – 11:10", "Судоустройство и правоохранительные органы", "Семинар", "604", "Миллер А.В."),
+    ("Четверг", "Четная", "12:00 – 13:00", "Физическая культура", "Семинар", "Стадион Динамо", "Скидан М.Н."),
+    ("Четверг", "Четная", "13:00 – 14:00", "Физическая культура", "Семинар", "Стадион Динамо", "Скидан М.Н."),
+    ("Пятница", "Четная", "08:00 – 09:30", "Иностранный язык в профессиональной деятельности", "Семинар", "404", "Горобец А.Ф."),
+    ("Пятница", "Четная", "09:40 – 11:10", "История отечественного государства и права", "Семинар", "601", "Тушканов И.В."),
+    ("Пятница", "Четная", "11:40 – 13:10", "Административное право", "Семинар", "410", "Сердюков А.Г."),
+    ("Пятница", "Четная", "13:20 – 14:50", "Информационные технологии в профессиональной деятельности", "Семинар", "505 Пк", "Крутов Л.В."),
+    ("Суббота", "Четная", "08:00 – 09:30", "Иностранный язык в профессиональной деятельности", "Семинар", "308", "Горобец А.Ф."),
+    ("Суббота", "Четная", "09:40 – 11:10", "Документационное обеспечение управления", "Семинар", "308", "Буцкий О.И."),
+    ("Суббота", "Четная", "11:40 – 13:10", "Иностранный язык в профессиональной деятельности", "Семинар", "508", "Горобец А.Ф."),
+    # ----- НЕЧЁТНАЯ неделя -----
+    ("Понедельник", "Нечетная", "08:00 – 09:30", "Иностранный язык в профессиональной деятельности", "Семинар", "404", "Горобец А.Ф."),
+    ("Понедельник", "Нечетная", "09:40 – 11:10", "Основы финансовой грамотности", "Семинар", "601", "Веселова Н.Ю."),
+    ("Понедельник", "Нечетная", "12:00 – 13:00", "Физическая культура", "Семинар", "Стадион Динамо", "Скидан М.Н."),
+    ("Вторник", "Нечетная", "08:00 – 09:30", "Этика", "Лекция", "617", "Абельбеисов В.А."),
+    ("Вторник", "Нечетная", "09:40 – 11:10", "Судоустройство и правоохранительные органы", "Лекция", "617", "Плетнев В.В."),
+    ("Вторник", "Нечетная", "11:40 – 13:10", "История отечественного государства и права", "Лекция", "617", "Микуленок Ю.А."),
+    ("Вторник", "Нечетная", "13:20 – 14:50", "Документационное обеспечение управления", "Лекция", "617", "Буцкий О.И."),
+    ("Среда", "Нечетная", "15:20 – 16:50", "Русский язык и культура речи", "Лекция", "812", "Гарцуева О.А."),
+    ("Среда", "Нечетная", "17:00 – 18:30", "Основы философии", "Лекция", "812", "Арутюнян О.А."),
+    ("Четверг", "Нечетная", "08:00 – 09:30", "История России", "Семинар", "603", "Микуленок А.А."),
+    ("Четверг", "Нечетная", "09:40 – 11:10", "Основы бережливого производства", "Семинар", "603", "Опришко Е.Л."),
+    ("Четверг", "Нечетная", "11:40 – 13:10", "История отечественного государства и права", "Семинар", "604", "Тушканов И.В."),
+    ("Четверг", "Нечетная", "13:20 – 14:50", "Иностранный язык в профессиональной деятельности", "Семинар", "810", "Горобец А.Ф."),
+    ("Пятница", "Нечетная", "08:00 – 09:30", "Иностранный язык в профессиональной деятельности", "Семинар", "302", "Горобец А.Ф."),
+    ("Пятница", "Нечетная", "09:40 – 11:10", "Иностранный язык в профессиональной деятельности", "Семинар", "502", "Горобец А.Ф."),
+    ("Пятница", "Нечетная", "11:40 – 13:10", "Конституционное право России", "Семинар", "601", "Кузнецов А.А."),
+    ("Пятница", "Нечетная", "13:20 – 14:50", "Теория государства и права", "Семинар", "601", "Матюшенко К.Б."),
+    ("Суббота", "Нечетная", "08:00 – 09:30", "Информационные технологии в профессиональной деятельности", "Семинар", "405 Пк", "Крутов Л.В."),
+    ("Суббота", "Нечетная", "09:40 – 11:10", "Конституционное право России", "Лекция", "617", "Манасян С.А."),
+    ("Суббота", "Нечетная", "11:40 – 13:10", "Теория государства и права", "Лекция", "617", "Таранок Ю.В."),
+]
+
+# ---------- МИЛЫЙ СТИЛЬ ----------
 CUTE_IMAGES = [
     "https://images.unsplash.com/photo-151724813546-076164d0d2d6?w=600",
     "https://images.unsplash.com/photo-1604896349745-0c51c66d1e39?w=600",
@@ -113,6 +160,8 @@ PHR = {
 S = {
     "ru": {
         "greeting": "Приветик, {name} 💕✨ Я твоя помощница. Выбирай, что хочется:",
+        "greeting_seeded": "\n✨ И я сразу загрузила твоё расписание — обе недели. Всё по часам!",
+        "cleared": "🧹 Расписание очищено. Теперь напиши /start — и я загружу твоё полное расписание ✨",
         "choose": "🏰 Выбирай раздел:",
         "no_lessons": "Пар нет… Ой, как круто 🎉✨ Ура, можно отдыхать 💃🌸",
         "day_head": "📅 <b>{day} ({week} неделя)</b>",
@@ -186,6 +235,8 @@ S = {
     },
     "en": {
         "greeting": "Hi there, {name} 💕✨ I’m your little helper. Pick whatever you like:",
+        "greeting_seeded": "\n✨ And I’ve just loaded your full schedule — both weeks. All in time order!",
+        "cleared": "🧹 Schedule cleared. Now type /start — and I’ll load your full schedule ✨",
         "choose": "🏰 Pick a section:",
         "no_lessons": "No lessons… Yay, how cool 🎉✨ Time to chill 💃🌸",
         "day_head": "📅 <b>{day} ({week} week)</b>",
@@ -340,12 +391,14 @@ def subject_emoji(subj: str) -> str:
         return "📜"
     if any(x in s for x in ["история", "history", "древн"]):
         return "📂"
-    if any(x in s for x in ["английск", "иностр", "eng", "foreign", "language", "язык"]):
+    if any(x in s for x in ["английск", "иностр", "eng", "foreign", "язык", "language"]):
         return "🔤"
     if any(x in s for x in ["физическ", "спорт", "phys", "sport"]):
         return "💪"
     if any(x in s for x in ["философ", "финанс", "этик", "philosoph", "financ", "ethic"]):
         return "🧠"
+    if any(x in s for x in ["бережлив", "технолог", "lean", "tech"]):
+        return "💻"
     return "📚"
 
 def get_week_type(date_obj):
@@ -414,13 +467,41 @@ async def init_db():
         await db.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, lang TEXT DEFAULT 'ru')")
         await db.commit()
 
+# ---------- АВТОЗАГРУЗКА РАСПИСАНИЯ ----------
+async def seed_schedule_if_empty(user_id):
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT COUNT(*) FROM schedule WHERE user_id=?", (user_id,)) as cur:
+            (cnt,) = await cur.fetchone()
+        if cnt == 0:
+            await db.executemany(
+                """INSERT INTO schedule (user_id, day, week_type, time, subject, lesson_type, room, teacher)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                [(user_id, d, w, t, s, lt, r, te) for d, w, t, s, lt, r, te in SEED_DATA]
+            )
+            await db.commit()
+            return True
+    return False
+
 # ---------- СТАРТ ----------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     lang = await get_lang(message.from_user.id)
+    seeded = await seed_schedule_if_empty(message.from_user.id)
     name = message.from_user.first_name or ("зайка" if lang == "ru" else "babe")
-    await message.answer(T(lang, "greeting", name=name), reply_markup=main_menu_kb(lang))
+    hello = T(lang, "greeting", name=name)
+    if seeded:
+        hello += T(lang, "greeting_seeded")
+    await message.answer(hello, reply_markup=main_menu_kb(lang))
+
+@dp.message(Command("clear"))
+async def cmd_clear(message: types.Message, state: FSMContext):
+    await state.clear()
+    lang = await get_lang(message.from_user.id)
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("DELETE FROM schedule WHERE user_id=?", (message.from_user.id,))
+        await db.commit()
+    await message.answer(T(lang, "cleared"), reply_markup=main_menu_kb(lang))
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
@@ -437,14 +518,14 @@ async def toggle_lang(message: types.Message, state: FSMContext):
     await set_lang(message.from_user.id, new_lang)
     await message.answer(T(new_lang, "lang_switched"), reply_markup=main_menu_kb(new_lang))
 
-# ---------- ДЕНЬ ----------
+# ---------- ДЕНЬ (пары всегда по часам, с номерами) ----------
 async def build_day_view(user_id, target_date, lang):
-    day_name = DAY_NAMES["ru"][target_date.weekday()]
+    day_ru = DAY_NAMES["ru"][target_date.weekday()]
     week_type = get_week_type(target_date)
     async with aiosqlite.connect(DB) as db:
         async with db.execute("""SELECT id, time, subject, lesson_type, room, teacher, note FROM schedule
             WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую')""",
-            (user_id, day_name, week_type)) as cur:
+            (user_id, day_ru, week_type)) as cur:
             lessons = await cur.fetchall()
         async with db.execute("SELECT id, subject, task, photo_id, done FROM homework WHERE user_id=?", (user_id,)) as cur:
             all_hws = await cur.fetchall()
@@ -799,7 +880,7 @@ async def save_note(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(T(lang, "note_saved"))
 
-# ---------- НАСТРОЙКА НЕДЕЛЬКИ ----------
+# ---------- НАСТРОЙКА НЕДЕЛЬКИ (добавление пар) ----------
 @dp.message(F.text.in_({MENU["setup"]["ru"], MENU["setup"]["en"]}))
 async def setup_schedule(message: types.Message):
     lang = await get_lang(message.from_user.id)
@@ -884,7 +965,7 @@ async def proc_teacher(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(T(lang, "pair_added", s=esc(data["subject"])), reply_markup=main_menu_kb(lang), parse_mode="HTML")
 
-# ---------- ПОПРАВИТЬ РАСПИСАНИЕ ----------
+# ---------- ПОПРАВИТЬ РАСПИСАНИЕ: день → пары → сразу все варианты ----------
 @dp.message(F.text.in_({MENU["edit"]["ru"], MENU["edit"]["en"]}))
 async def edit_schedule(message: types.Message):
     lang = await get_lang(message.from_user.id)
@@ -1024,11 +1105,6 @@ async def edit_add(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # ---------- TO-DO ----------
-@dp.message(F.text.in_({MENU["todo"]["ru"], MENU["todo"]["en"]}))
-async def todo_list(message: types.Message):
-    lang = await get_lang(message.from_user.id)
-    await todo_list_render(message.chat.id, message.from_user.id, lang, message=message)
-
 async def todo_list_render(chat_id, user_id, lang, message=None, callback=None):
     async with aiosqlite.connect(DB) as db:
         async with db.execute("SELECT id, text, done FROM tasks WHERE user_id=? ORDER BY id", (user_id,)) as cur:
@@ -1053,6 +1129,11 @@ async def todo_list_render(chat_id, user_id, lang, message=None, callback=None):
             await callback.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="HTML")
         except Exception:
             pass
+
+@dp.message(F.text.in_({MENU["todo"]["ru"], MENU["todo"]["en"]}))
+async def todo_list(message: types.Message):
+    lang = await get_lang(message.from_user.id)
+    await todo_list_render(message.chat.id, message.from_user.id, lang, message=message)
 
 @dp.callback_query(F.data.startswith("todo_"))
 async def todo_toggle(callback: types.CallbackQuery):
