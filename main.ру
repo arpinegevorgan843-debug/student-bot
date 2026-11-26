@@ -51,10 +51,10 @@ async def handle_menu(callback: types.CallbackQuery):
             "settings": "⚙️ **Настройки**\n(Здесь можно добавить или удалить пару)"
 }
 
-await callback.message.edit_text(
-text=texts[callback.data],
-reply_markup=get_back_menu(),
-parse_mode="Markdown"
+    await callback.message.edit_text(
+            text=texts[callback.data],
+            reply_markup=get_back_menu(),
+            parse_mode="Markdown"
 )
 
 @dp.callback_query(F.data == "back_to_main")
