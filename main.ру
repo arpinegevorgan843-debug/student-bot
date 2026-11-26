@@ -37,7 +37,6 @@ def wd(wt, lang):
     return WD.get(wt, {}).get(lang, wt)
 
 # ---------- ТВОЁ РАСПИСАНИЕ (вшито в бота) ----------
-# (день, неделя, время, предмет, тип, аудитория, преподаватель)
 SEED_DATA = [
     # ----- ЧЁТНАЯ неделя -----
     ("Понедельник", "Четная", "15:20 – 16:50", "Основы философии", "Семинар", "712", "Гишай А.В."),
@@ -160,8 +159,7 @@ PHR = {
 S = {
     "ru": {
         "greeting": "Приветик, {name} 💕✨ Я твоя помощница. Выбирай, что хочется:",
-        "greeting_seeded": "\n✨ И я сразу загрузила твоё расписание — обе недели. Всё по часам!",
-        "cleared": "🧹 Расписание очищено. Теперь напиши /start — и я загружу твоё полное расписание ✨",
+        "greeting_seeded": "\n✨ Загрузила твоё расписание — обе недели, всё по часам!",
         "choose": "🏰 Выбирай раздел:",
         "no_lessons": "Пар нет… Ой, как круто 🎉✨ Ура, можно отдыхать 💃🌸",
         "day_head": "📅 <b>{day} ({week} неделя)</b>",
@@ -214,7 +212,6 @@ S = {
         "deleted": "Удалено 🗑",
         "todo_head": "✅ <b>Списочек дел:</b>",
         "todo_empty": "Списочек пуст. Напиши одно маленькое дело ✨:",
-        "todo_empty2": "Списочек пуст 🎉",
         "todo_add_prompt": "Напиши новое дело ✨:",
         "todo_added": "✅ Дело добавлено в списочек 💕",
         "btn_todo": "✅ Выполнить: {s}",
@@ -235,8 +232,7 @@ S = {
     },
     "en": {
         "greeting": "Hi there, {name} 💕✨ I’m your little helper. Pick whatever you like:",
-        "greeting_seeded": "\n✨ And I’ve just loaded your full schedule — both weeks. All in time order!",
-        "cleared": "🧹 Schedule cleared. Now type /start — and I’ll load your full schedule ✨",
+        "greeting_seeded": "\n✨ Loaded your full schedule — both weeks, all in time order!",
         "choose": "🏰 Pick a section:",
         "no_lessons": "No lessons… Yay, how cool 🎉✨ Time to chill 💃🌸",
         "day_head": "📅 <b>{day} ({week} week)</b>",
@@ -289,7 +285,6 @@ S = {
         "deleted": "Deleted 🗑",
         "todo_head": "✅ <b>To-do list:</b>",
         "todo_empty": "The list is empty. Type one tiny task ✨:",
-        "todo_empty2": "The list is empty 🎉",
         "todo_add_prompt": "Type a new task ✨:",
         "todo_added": "✅ Task added to the list 💕",
         "btn_todo": "✅ Complete: {s}",
@@ -319,15 +314,16 @@ def phrase(lang, group):
 
 # ---------- МЕНЮ ----------
 MENU = {
-    "today":   {"ru": "🌸 Расписание на сегодня", "en": "🌸 Today’s schedule"},
-    "tomorrow":{"ru": "🌷 Расписание на завтра",  "en": "🌷 Tomorrow’s schedule"},
-    "week":    {"ru": "🎀 Расписание на недельку","en": "🎀 Weekly schedule"},
-    "add_hw":  {"ru": "💖 Добавить домашечку ✨", "en": "💖 Add homework ✨"},
-    "note":    {"ru": "🌼 Заметочка",             "en": "🌼 Little note"},
-    "todo":    {"ru": "🌟 Списочек дел",          "en": "🌟 To-do list"},
-    "hw_list": {"ru": "📚 Мои домашечки",         "en": "📚 My homework"},
-    "setup":   {"ru": "🪄 Настроить недельку",    "en": "🪄 Set up the week"},
-    "edit":    {"ru": "🦋 Поправить расписание",  "en": "🦋 Edit schedule"},
+    "start":    {"ru": "🚀 Старт",                 "en": "🚀 Start"},
+    "today":    {"ru": "🌸 Расписание на сегодня", "en": "🌸 Today’s schedule"},
+    "tomorrow": {"ru": "🌷 Расписание на завтра",  "en": "🌷 Tomorrow’s schedule"},
+    "week":     {"ru": "🎀 Расписание на недельку","en": "🎀 Weekly schedule"},
+    "add_hw":   {"ru": "💖 Добавить домашечку ✨", "en": "💖 Add homework ✨"},
+    "note":     {"ru": "🌼 Заметочка",             "en": "🌼 Little note"},
+    "todo":     {"ru": "🌟 Списочек дел",          "en": "🌟 To-do list"},
+    "hw_list":  {"ru": "📚 Мои домашечки",         "en": "📚 My homework"},
+    "setup":    {"ru": "🪄 Настроить недельку",    "en": "🪄 Set up the week"},
+    "edit":     {"ru": "🦋 Поправить расписание",  "en": "🦋 Edit schedule"},
 }
 LANG_BTN = {"ru": "🌐 English", "en": "🌐 Русский"}
 
@@ -344,6 +340,7 @@ def main_menu_kb(lang):
     m = MENU
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text=m["start"][lang])],
             [KeyboardButton(text=m["today"][lang]), KeyboardButton(text=m["tomorrow"][lang])],
             [KeyboardButton(text=m["week"][lang])],
             [KeyboardButton(text=m["add_hw"][lang]), KeyboardButton(text=m["note"][lang])],
@@ -391,7 +388,7 @@ def subject_emoji(subj: str) -> str:
         return "📜"
     if any(x in s for x in ["история", "history", "древн"]):
         return "📂"
-    if any(x in s for x in ["английск", "иностр", "eng", "foreign", "язык", "language"]):
+    if any(x in s for x in ["английск", "иностр", "язык", "language", "foreign"]):
         return "🔤"
     if any(x in s for x in ["физическ", "спорт", "phys", "sport"]):
         return "💪"
@@ -467,41 +464,37 @@ async def init_db():
         await db.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, lang TEXT DEFAULT 'ru')")
         await db.commit()
 
-# ---------- АВТОЗАГРУЗКА РАСПИСАНИЯ ----------
-async def seed_schedule_if_empty(user_id):
+# ---------- ЗАГРУЗКА РАСПИСАНИЯ (стирает старое и заливает заново) ----------
+async def reseed_schedule(user_id):
     async with aiosqlite.connect(DB) as db:
-        async with db.execute("SELECT COUNT(*) FROM schedule WHERE user_id=?", (user_id,)) as cur:
-            (cnt,) = await cur.fetchone()
-        if cnt == 0:
-            await db.executemany(
-                """INSERT INTO schedule (user_id, day, week_type, time, subject, lesson_type, room, teacher)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                [(user_id, d, w, t, s, lt, r, te) for d, w, t, s, lt, r, te in SEED_DATA]
-            )
-            await db.commit()
-            return True
-    return False
+        await db.execute("DELETE FROM schedule WHERE user_id=?", (user_id,))
+        await db.executemany(
+            """INSERT INTO schedule (user_id, day, week_type, time, subject, lesson_type, room, teacher)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [(user_id, d, w, t, s, lt, r, te) for d, w, t, s, lt, r, te in SEED_DATA]
+        )
+        await db.commit()
 
-# ---------- СТАРТ ----------
+# ---------- СТАРТ: команда и кнопка ----------
+async def do_start(user_id, lang):
+    await reseed_schedule(user_id)
+    name = "" # имя подтянем снаружи
+    return name
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     lang = await get_lang(message.from_user.id)
-    seeded = await seed_schedule_if_empty(message.from_user.id)
+    await reseed_schedule(message.from_user.id)
     name = message.from_user.first_name or ("зайка" if lang == "ru" else "babe")
-    hello = T(lang, "greeting", name=name)
-    if seeded:
-        hello += T(lang, "greeting_seeded")
-    await message.answer(hello, reply_markup=main_menu_kb(lang))
+    await message.answer(T(lang, "greeting", name=name) + T(lang, "greeting_seeded"), reply_markup=main_menu_kb(lang))
 
-@dp.message(Command("clear"))
-async def cmd_clear(message: types.Message, state: FSMContext):
+@dp.message(F.text.in_({MENU["start"]["ru"], MENU["start"]["en"]}))
+async def menu_start(message: types.Message, state: FSMContext):
     await state.clear()
     lang = await get_lang(message.from_user.id)
-    async with aiosqlite.connect(DB) as db:
-        await db.execute("DELETE FROM schedule WHERE user_id=?", (message.from_user.id,))
-        await db.commit()
-    await message.answer(T(lang, "cleared"), reply_markup=main_menu_kb(lang))
+    await reseed_schedule(message.from_user.id)
+    await message.answer(T(lang, "greeting_seeded").lstrip("\n"), reply_markup=main_menu_kb(lang))
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
@@ -597,8 +590,7 @@ async def sched_tomorrow_msg(message: types.Message, state: FSMContext = None):
 # ---------- НЕДЕЛЯ ----------
 async def build_week_view(user_id, offset, lang):
     monday = datetime.now() - timedelta(days=datetime.now().weekday()) + timedelta(weeks=offset)
-    week_type = get_week_type(monday)
-    text = T(lang, "week_head", week=wd(week_type, lang)) + "\n\n"
+    text = T(lang, "week_head", week=wd(get_week_type(monday), lang)) + "\n\n"
     empty = True
     async with aiosqlite.connect(DB) as db:
         for i in range(7):
@@ -965,7 +957,7 @@ async def proc_teacher(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(T(lang, "pair_added", s=esc(data["subject"])), reply_markup=main_menu_kb(lang), parse_mode="HTML")
 
-# ---------- ПОПРАВИТЬ РАСПИСАНИЕ: день → пары → сразу все варианты ----------
+# ---------- ПОПРАВИТЬ РАСПИСАНИЕ ----------
 @dp.message(F.text.in_({MENU["edit"]["ru"], MENU["edit"]["en"]}))
 async def edit_schedule(message: types.Message):
     lang = await get_lang(message.from_user.id)
@@ -1180,7 +1172,9 @@ async def check_menu(message: types.Message, state: FSMContext):
     key = MENU_BY_TEXT.get(message.text or "")
     if key:
         await state.clear()
-        if key == "today":
+        if key == "start":
+            await menu_start(message, state)
+        elif key == "today":
             await sched_today_msg(message, state)
         elif key == "tomorrow":
             await sched_tomorrow_msg(message, state)
