@@ -214,7 +214,7 @@ async def add_finance_save(message: types.Message, state: FSMContext):
 async def stats_finance(callback: types.CallbackQuery):
     async with aiosqlite.connect("db.sqlite") as db: 
     async with db.execute("SELECT type, SUM(amount) FROM finance WHERE user_id = ? GROUP BY type", (callback.from_user.id,)) as cursor:
-            rows = await cursor.fetchall()
+    rows = await cursor.fetchall()
             
     income = 0
     expense = 0
