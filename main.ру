@@ -23,13 +23,13 @@ def get_week_type(date_obj):
 class BotStates(StatesGroup):
     waiting_for_hw_text = State()
     waiting_for_hw_photo = State()
-    waiting_for_note = State()
-    waiting_for_subj_name = State()
-    waiting_for_type = State()
-    waiting_for_week = State()
-    waiting_for_time = State()
-    waiting_for_room = State()
-    waiting_for_teacher = State()
+    waiting_for_note = State()
+    waiting_for_subj_name = State()
+    waiting_for_type = State()
+    waiting_for_week = State()
+    waiting_for_time = State()
+    waiting_for_room = State()
+    waiting_for_teacher = State()
 
 async def init_db():
     async with aiosqlite.connect("db.sqlite") as db:
