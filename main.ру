@@ -5,6 +5,7 @@ import html
 import re
 import random
 import string
+import io
 import aiohttp
 import aiosqlite
 from datetime import datetime, timedelta
@@ -15,8 +16,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiohttp import web
+from PIL import Image, ImageDraw, ImageFont
+from aiogram.types import BufferedInputFile
 
-BOT_TOKEN = "9257823958:AAEGecZSkjljfY1NdAdIkaQNHGcXrkSuOow"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "ВСТАВЬ_ТОКЕН")
 DB = "db.sqlite"
 
 # ---------- ЯЗЫКИ ----------
@@ -27,6 +30,12 @@ DAY_NAMES = {
 DAYS_SHORT = {
     "ru": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"],
     "en": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+}
+MONTHS = {
+    "ru": ["января", "февраля", "марта", "апреля", "мая", "июня",
+           "июля", "августа", "сентября", "октября", "ноября", "декабря"],
+    "en": ["January", "February", "March", "April", "May", "June",
+           "July", "August", "September", "October", "November", "December"],
 }
 WD = {
     "Четная":   {"ru": "Четная",   "en": "Even"},
@@ -40,7 +49,6 @@ def wd(wt, lang):
 SEED_DATA = [
     # ----- ЧЁТНАЯ неделя -----
     ("Понедельник", "Четная", "15:20 – 16:50", "Основы философии", "Семинар", "712", "Гишай А.В."),
-    ("Понедельник", "Четная", "17:00 – 18:30", "Иностранный язык в профессиональной деятельности", "Семинар", "403", "Горобец А.Ф."),
     ("Вторник", "Четная", "08:00 – 09:30", "Теория государства и права", "Семинар", "603", "Матюшенко К.Б."),
     ("Вторник", "Четная", "09:40 – 11:10", "История России", "Лекция", "617", "Микуленок А.А."),
     ("Вторник", "Четная", "11:40 – 13:10", "Теория государства и права", "Лекция", "617", "Таранок Ю.В."),
@@ -52,15 +60,14 @@ SEED_DATA = [
     ("Четверг", "Четная", "09:40 – 11:10", "Судоустройство и правоохранительные органы", "Семинар", "604", "Миллер А.В."),
     ("Четверг", "Четная", "12:00 – 13:00", "Физическая культура", "Семинар", "Стадион Динамо", "Скидан М.Н."),
     ("Четверг", "Четная", "13:00 – 14:00", "Физическая культура", "Семинар", "Стадион Динамо", "Скидан М.Н."),
-    ("Пятница", "Четная", "08:00 – 09:30", "Иностранный язык в профессиональной деятельности", "Семинар", "404", "Горобец А.Ф."),
+    ("Пятница", "Четная", "08:00 – 09:30", "Английский язык", "Семинар", "404", "Горобец А.Ф."),
     ("Пятница", "Четная", "09:40 – 11:10", "История отечественного государства и права", "Семинар", "601", "Тушканов И.В."),
     ("Пятница", "Четная", "11:40 – 13:10", "Административное право", "Семинар", "410", "Сердюков А.Г."),
     ("Пятница", "Четная", "13:20 – 14:50", "Информационные технологии в профессиональной деятельности", "Семинар", "505 Пк", "Крутов Л.В."),
-    ("Суббота", "Четная", "08:00 – 09:30", "Иностранный язык в профессиональной деятельности", "Семинар", "308", "Горобец А.Ф."),
+    ("Суббота", "Четная", "08:00 – 09:30", "Английский язык", "Семинар", "308", "Горобец А.Ф."),
     ("Суббота", "Четная", "09:40 – 11:10", "Документационное обеспечение управления", "Семинар", "308", "Буцкий О.И."),
-    ("Суббота", "Четная", "11:40 – 13:10", "Иностранный язык в профессиональной деятельности", "Семинар", "508", "Горобец А.Ф."),
     # ----- НЕЧЁТНАЯ неделя -----
-    ("Понедельник", "Нечетная", "08:00 – 09:30", "Иностранный язык в профессиональной деятельности", "Семинар", "404", "Горобец А.Ф."),
+    ("Понедельник", "Нечетная", "08:00 – 09:30", "Английский язык", "Семинар", "404", "Горобец А.Ф."),
     ("Понедельник", "Нечетная", "09:40 – 11:10", "Основы финансовой грамотности", "Семинар", "601", "Веселова Н.Ю."),
     ("Понедельник", "Нечетная", "12:00 – 13:00", "Физическая культура", "Семинар", "Стадион Динамо", "Скидан М.Н."),
     ("Вторник", "Нечетная", "08:00 – 09:30", "Этика", "Лекция", "617", "Абельбеисов В.А."),
@@ -72,9 +79,9 @@ SEED_DATA = [
     ("Четверг", "Нечетная", "08:00 – 09:30", "История России", "Семинар", "603", "Микуленок А.А."),
     ("Четверг", "Нечетная", "09:40 – 11:10", "Основы бережливого производства", "Семинар", "603", "Опришко Е.Л."),
     ("Четверг", "Нечетная", "11:40 – 13:10", "История отечественного государства и права", "Семинар", "604", "Тушканов И.В."),
-    ("Четверг", "Нечетная", "13:20 – 14:50", "Иностранный язык в профессиональной деятельности", "Семинар", "810", "Горобец А.Ф."),
-    ("Пятница", "Нечетная", "08:00 – 09:30", "Иностранный язык в профессиональной деятельности", "Семинар", "302", "Горобец А.Ф."),
-    ("Пятница", "Нечетная", "09:40 – 11:10", "Иностранный язык в профессиональной деятельности", "Семинар", "502", "Горобец А.Ф."),
+    ("Четверг", "Нечетная", "13:20 – 14:50", "Английский язык", "Семинар", "810", "Горобец А.Ф."),
+    ("Пятница", "Нечетная", "08:00 – 09:30", "Английский язык", "Семинар", "302", "Горобец А.Ф."),
+    ("Пятница", "Нечетная", "09:40 – 11:10", "Английский язык", "Семинар", "502", "Горобец А.Ф."),
     ("Пятница", "Нечетная", "11:40 – 13:10", "Конституционное право России", "Семинар", "601", "Кузнецов А.А."),
     ("Пятница", "Нечетная", "13:20 – 14:50", "Теория государства и права", "Семинар", "601", "Матюшенко К.Б."),
     ("Суббота", "Нечетная", "08:00 – 09:30", "Информационные технологии в профессиональной деятельности", "Семинар", "405 Пк", "Крутов Л.В."),
@@ -82,23 +89,24 @@ SEED_DATA = [
     ("Суббота", "Нечетная", "11:40 – 13:10", "Теория государства и права", "Лекция", "617", "Таранок Ю.В."),
 ]
 
-# ---------- МИЛЫЙ СТИЛЬ ----------
+# ---------- ФОНОЧКИ ДЛЯ КАРТОЧЕК (если свой фон не прислан) ----------
 CUTE_IMAGES = [
-    "https://images.unsplash.com/photo-151724813546-076164d0d2d6?w=600",
-    "https://images.unsplash.com/photo-1604896349745-0c51c66d1e39?w=600",
-    "https://images.unsplash.com/photo-1481758922107-c3e15e784c7b?w=600",
+    "https://images.unsplash.com/photo-151724813546-076164d0d2d6?w=1080",
+    "https://images.unsplash.com/photo-1604896349745-0c51c66d1e39?w=1080",
+    "https://images.unsplash.com/photo-1481758922107-c3e15e784c7b?w=1080",
 ]
 
+# ---------- МИЛЫЙ СТИЛЬ (чистые языки, без смешивания) ----------
 PHR = {
     "fallback": {
         "ru": [
-            "Oopsie, кошечка, я не совсем поняла… что хочешь? ✨",
-            "Sweetie, напиши чуть-чуть по-другому, чтобы я уловила суть 🌸",
-            "Babe, звучит интересно, но давай разберём по полочкам? 💕",
-            "I’m a bit lost, cutie! Расскажи ещё разок? 🥺",
+            "Упс, кошечка, я не совсем поняла… что хочешь? ✨",
+            "Милашка, напиши чуть-чуть по-другому, чтобы я уловила суть 🌸",
+            "Зайка, звучит интересно, но давай разберём по полочкам? 💕",
+            "Я немного растерялась! Расскажи ещё разок? 🥺",
         ],
         "en": [
-            "Oopsie, I didn’t quite get that… what would you like, cutie? ✨",
+            "Oopsie, cutie, I didn’t quite get that… what would you like? ✨",
             "Sweetie, say it a little differently so I can catch it 🌸",
             "Babe, sounds interesting — tell me a bit more? 💕",
             "I’m a bit lost, honey! One more time? 🥺",
@@ -106,11 +114,11 @@ PHR = {
     },
     "closings": {
         "ru": [
-            "Have a fab day, красотка! ✨",
-            "You’re a star, милашка! Хорошего дня! 💕",
-            "Crush it today, ты точно справишься! 🌸",
-            "Go get ’em, tiger! Хороших оценок! 💃",
-            "You’ve got this, зайка! Отдыхай потом! ☕",
+            "Хорошего дня, красотка! ✨",
+            "Ты звёздочка, милашка! Хорошего дня! 💕",
+            "Покоряй этот день, ты точно справишься! 🌸",
+            "Вперёд, тигрёнок! Хороших оценок! 💃",
+            "Ты справишься, зайка! Отдыхай потом! ☕",
         ],
         "en": [
             "Have a fab day, cutie! ✨",
@@ -122,10 +130,10 @@ PHR = {
     },
     "hw": {
         "ru": [
-            "You’ve got this, ты точно всё сделаешь! 💕",
-            "It’s gonna be okay, это всего лишь маленькая задачка. Ты супер! ✨",
-            "Don’t stress, разберёшься. Я в тебя верю! 🌸",
-            "One step at a time, ты молодец! Всё получится! 💪",
+            "У тебя всё получится, я в тебя верю! 💕",
+            "Всё будет хорошо, это всего лишь маленькая задачка. Ты супер! ✨",
+            "Не переживай, разберёшься. Я в тебя верю! 🌸",
+            "Шажок за шажком, ты молодец! Всё получится! 💪",
         ],
         "en": [
             "You’ve got this — you’ll nail it! 💕",
@@ -136,11 +144,11 @@ PHR = {
     },
     "motiv": {
         "ru": [
-            "Yay! Ещё одна галочка! You’re on fire! 🔥",
-            "You’re doing great, красотка! Ещё чуть-чуть! ✨",
-            "That’s the spirit, зайка! Ты такая молодец! 💕",
-            "Keep slaying it! С таким темпом всё успеешь! 💃",
-            "You’re crushing it! Можно выдохнуть и попить чаю! ☕",
+            "Ура! Ещё одна галочка! Ты в огне! 🔥",
+            "У тебя отлично получается, красотка! Ещё чуть-чуть! ✨",
+            "Вот это настрой, зайка! Ты такая молодец! 💕",
+            "Продолжай в том же духе! С таким темпом всё успеешь! 💃",
+            "Ты справляешься на ура! Можно выдохнуть и попить чаю! ☕",
         ],
         "en": [
             "Yay! One more check! You’re on fire! 🔥",
@@ -159,37 +167,32 @@ PHR = {
 S = {
     "ru": {
         "greeting": "Приветик, {name} 💕✨ Я твоя помощница. Выбирай, что хочется:",
-        "greeting_seeded": "\n✨ Загрузила твоё расписание — обе недели, всё по часам!",
+        "greeting_seeded": "\n✨ Расписание на месте — обе недели, всё по часам!",
         "choose": "🏰 Выбирай раздел:",
         "no_lessons": "Пар нет… Ой, как круто 🎉✨ Ура, можно отдыхать 💃🌸",
-        "day_head": "📅 <b>{day} ({week} неделя)</b>",
+        "day_head_date": "📅 <b>{day}, {date} ({week} неделя)</b>",
         "week_head": "🗓 <b>Расписание на неделю ({week})</b>",
         "week_empty": "На этой недельке пока ни одной пары — просто красота 💕✨",
-        "hw": "💖 Домашечка: {task}",
-        "hw_done": "💖 <s>Домашечка: {task}</s>",
         "photo_lbl": "🖼 [фото]",
         "note_lbl": "💌 Заметочка: {note}",
         "btn_done": "✅ Выполнено: {s}",
         "btn_undo": "↩️ Вернуть: {s}",
-        "btn_photo": "🖼 Фото ({s})",
+        "btn_photo": "🖼 Фото",
         "btn_note": "💌 Заметка к {s}",
         "btn_back": "◀️ Назад в меню",
-        "hw_start": "\n\nНапиши, какая домашечка и что сделать.\n(«Отмена» — передумать)",
-        "hw_saved": "✅ Домашечка записана и уже привязана к семинару! 💕\nМожешь прислать фоточки (можно сразу пачкой) — я сохраню их сама.\nКогда закончишь — напиши «Готово», или просто выбирай что-нибудь из меню ✨",
+        "hw_prompt": "\n\nНапиши в формате «Предмет: задание».\nНапример: «Английский: прочитать стр. 32, упр. 5»\n(«Отмена» — передумать)",
+        "hw_saved": "✅ Домашечка записана на ближайший будущий семинар «{s}» 💕\nМожешь прислать фоточки (можно сразу пачкой) — я сохраню их сама.\nКогда закончишь — напиши «Готово», или просто выбирай что-нибудь из меню ✨",
         "hw_photos": "📷 Фоточки добавлены, всего: {n} ✨",
         "hw_finish": "Сохранила домашечку 💕 Если хочешь добавить ещё одну — нажми «Добавить домашечку» ✨",
-        "hw_not_found": "❌ Ближайший семинар по этому тексту не найден, домашечка не сохранилась.",
+        "hw_not_found": "❌ Не нашла ближайший будущий семинар по этому тексту. Попробуй написать в формате «Предмет: задание» 🙂",
+        "hw_bad_subject": "Не узнала предмет перед двоеточием 😅 Напиши ещё раз, например: «Английский: прочитать текст»",
         "hw_none": "Домашечек пока нет — и это прекрасно ✨",
         "hw_head": "📝 <b>Домашечки:</b>",
         "hw_gone": "Хм, эта домашечка уже не найдена 🙈",
         "undone": "Вернула в список — ничего страшного, успеешь позже 🌸",
-        "achievement": "🎉✨ Ого, ты закрыла уже 5 домашек! This is amazing! Мини-достижение: «Железная дисциплина»! You’re a star! 🌸",
+        "achievement": "🎉✨ Ого, ты закрыла уже 5 домашек! Это потрясающе! Мини-достижение: «Железная дисциплина»! Ты звёздочка! 🌸",
         "for_you": "Для тебя, зайка 💕",
         "photo_cap": "Для тебя ✨",
-        "note_day": "К какой паре добавить заметочку? Выбери день:",
-        "note_none": "В этот день пар пока нет ✨",
-        "note_choose": "Пары на {day}: выбери, к какой добавить заметочку:",
-        "note_text": "Напиши текст заметочки:\n(«Отмена» — передумать)",
         "note_saved": "✅ Заметочка на месте 💕",
         "setup_head": "Строим недельку ✨. Выбери день:",
         "day_is": "День: <b>{day}</b>. Напиши название предмета:\n(«Отмена» — передумать)",
@@ -208,7 +211,7 @@ S = {
         "edit_delete": "🗑 Удалить пару",
         "edit_other": "◀️ Другая пара этого дня",
         "edit_gone": "Эта пара уже удалена 🙈",
-        "edit_done": "✅ All done! Можешь поправить ещё что-нибудь или вернуться в меню 💕",
+        "edit_done": "✅ Готово! Можешь поправить ещё что-нибудь или вернуться в меню 💕",
         "deleted": "Удалено 🗑",
         "todo_head": "✅ <b>Списочек дел:</b>",
         "todo_empty": "Списочек пуст. Напиши одно маленькое дело ✨:",
@@ -222,6 +225,7 @@ S = {
         "unknown_cmd": "Хм, такой команды пока нет. Напиши /start ✨",
         "thanks": "Ой, спасибочки 💕✨… и тебе спасибо, {addr}. Рада всегда помочь 🌸",
         "lang_switched": "Переключила на русский ✨",
+        "bg_saved": "💖 Фончик сохранён! Теперь он будет на всех розовых карточках расписания ✨",
         "f_subject": "Напиши новое название предмета:",
         "f_type": "Напиши новый тип (Лекция / Семинар):",
         "f_time": "Напиши новое время (например: 08:00 – 09:30):",
@@ -232,26 +236,25 @@ S = {
     },
     "en": {
         "greeting": "Hi there, {name} 💕✨ I’m your little helper. Pick whatever you like:",
-        "greeting_seeded": "\n✨ Loaded your full schedule — both weeks, all in time order!",
+        "greeting_seeded": "\n✨ Your schedule is here — both weeks, all in time order!",
         "choose": "🏰 Pick a section:",
         "no_lessons": "No lessons… Yay, how cool 🎉✨ Time to chill 💃🌸",
-        "day_head": "📅 <b>{day} ({week} week)</b>",
+        "day_head_date": "📅 <b>{day}, {date} ({week} week)</b>",
         "week_head": "🗓 <b>Weekly schedule ({week})</b>",
         "week_empty": "No lessons this week at all — pure bliss 💕✨",
-        "hw": "💖 Homework: {task}",
-        "hw_done": "💖 <s>Homework: {task}</s>",
         "photo_lbl": "🖼 [photo]",
         "note_lbl": "💌 Note: {note}",
         "btn_done": "✅ Done: {s}",
         "btn_undo": "↩️ Undo: {s}",
-        "btn_photo": "🖼 Photo ({s})",
+        "btn_photo": "🖼 Photo",
         "btn_note": "💌 Note for {s}",
         "btn_back": "◀️ Back to menu",
-        "hw_start": "\n\nType what the homework is and what to do.\n(«Cancel» to abort)",
-        "hw_saved": "✅ Homework saved and linked to the seminar! 💕\nYou can send photos (a whole batch at once) — I’ll save them myself.\nWhen you’re done — type «Done», or just pick anything from the menu ✨",
+        "hw_prompt": "\n\nType in the format «Subject: task».\nE.g. «English: read p. 32, ex. 5»\n(«Cancel» to abort)",
+        "hw_saved": "✅ Homework saved to the nearest upcoming lesson «{s}» 💕\nYou can send photos (a whole batch at once) — I’ll save them myself.\nWhen you’re done — type «Done», or just pick anything from the menu ✨",
         "hw_photos": "📷 Photos added, total: {n} ✨",
         "hw_finish": "Homework saved 💕 To add another one, tap «Add homework» ✨",
-        "hw_not_found": "❌ Couldn’t find the nearest seminar for this text, homework wasn’t saved.",
+        "hw_not_found": "❌ Couldn’t find an upcoming seminar for this text. Try the format «Subject: task» 🙂",
+        "hw_bad_subject": "Didn’t recognize the subject before the colon 😅 Try again, e.g. «English: read the text»",
         "hw_none": "No homework yet — isn’t it lovely ✨",
         "hw_head": "📝 <b>Homework:</b>",
         "hw_gone": "Hmm, that homework is already gone 🙈",
@@ -259,10 +262,6 @@ S = {
         "achievement": "🎉✨ Wow, you’ve closed 5 homework tasks already! This is amazing! Achievement unlocked: «Iron discipline»! You’re a star! 🌸",
         "for_you": "For you, babe 💕",
         "photo_cap": "For you ✨",
-        "note_day": "Which lesson gets a note? Pick a day:",
-        "note_none": "No lessons on this day yet ✨",
-        "note_choose": "Lessons on {day}: pick one for the note:",
-        "note_text": "Type the note text:\n(«Cancel» to abort)",
         "note_saved": "✅ Note saved 💕",
         "setup_head": "Let’s build the week ✨. Pick a day:",
         "day_is": "Day: <b>{day}</b>. Type the subject name:\n(«Cancel» to abort)",
@@ -295,6 +294,7 @@ S = {
         "unknown_cmd": "Hmm, no such command yet. Try /start ✨",
         "thanks": "Aww, thank you 💕✨… you’re so sweet, {addr}! Always happy to help 🌸",
         "lang_switched": "Switched to English ✨",
+        "bg_saved": "💖 Background saved! It will be on all the pink schedule cards ✨",
         "f_subject": "Type the new subject name:",
         "f_type": "Type the new type (Lecture / Seminar):",
         "f_time": "Type the new time (e.g. 08:00 – 09:30):",
@@ -321,6 +321,7 @@ MENU = {
     "add_hw":   {"ru": "💖 Добавить домашечку ✨", "en": "💖 Add homework ✨"},
     "note":     {"ru": "🌼 Заметочка",             "en": "🌼 Little note"},
     "todo":     {"ru": "🌟 Списочек дел",          "en": "🌟 To-do list"},
+    "grades":   {"ru": "🎀 Мои оценочки",          "en": "🎀 My grades"},
     "hw_list":  {"ru": "📚 Мои домашечки",         "en": "📚 My homework"},
     "setup":    {"ru": "🪄 Настроить недельку",    "en": "🪄 Set up the week"},
     "edit":     {"ru": "🦋 Поправить расписание",  "en": "🦋 Edit schedule"},
@@ -344,7 +345,8 @@ def main_menu_kb(lang):
             [KeyboardButton(text=m["today"][lang]), KeyboardButton(text=m["tomorrow"][lang])],
             [KeyboardButton(text=m["week"][lang])],
             [KeyboardButton(text=m["add_hw"][lang]), KeyboardButton(text=m["note"][lang])],
-            [KeyboardButton(text=m["todo"][lang]), KeyboardButton(text=m["hw_list"][lang])],
+            [KeyboardButton(text=m["todo"][lang]), KeyboardButton(text=m["grades"][lang])],
+            [KeyboardButton(text=m["hw_list"][lang])],
             [KeyboardButton(text=m["setup"][lang]), KeyboardButton(text=m["edit"][lang])],
             [KeyboardButton(text=LANG_BTN[lang])],
         ],
@@ -377,6 +379,7 @@ dp = Dispatcher()
 PHOTO_REPLY_TASKS = {}
 PHOTO_COUNTS = {}
 LANGS = {}
+BACKGROUNDS = {}
 
 def subject_emoji(subj: str) -> str:
     s = (subj or "").lower()
@@ -394,7 +397,7 @@ def subject_emoji(subj: str) -> str:
         return "💪"
     if any(x in s for x in ["философ", "финанс", "этик", "philosoph", "financ", "ethic"]):
         return "🧠"
-    if any(x in s for x in ["бережлив", "технолог", "lean", "tech"]):
+    if any(x in s for x in ["бережлив", "технолог", "информацион", "lean", "tech"]):
         return "💻"
     return "📚"
 
@@ -432,6 +435,9 @@ class BotStates(StatesGroup):
     waiting_for_teacher = State()
     waiting_for_todo = State()
     waiting_for_edit_value = State()
+    waiting_for_grade_value = State()
+    waiting_for_grade_reason = State()
+    waiting_for_grade_edit = State()
 
 # ---------- ЯЗЫК ПОЛЬЗОВАТЕЛЯ ----------
 async def get_lang(user_id):
@@ -462,25 +468,34 @@ async def init_db():
             (id INTEGER PRIMARY KEY, user_id INTEGER, text TEXT, done INTEGER DEFAULT 0)""")
         await db.execute("CREATE TABLE IF NOT EXISTS users_stats (user_id INTEGER PRIMARY KEY, total_done INTEGER DEFAULT 0)")
         await db.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, lang TEXT DEFAULT 'ru')")
+        await db.execute("""CREATE TABLE IF NOT EXISTS grades
+            (id INTEGER PRIMARY KEY, user_id INTEGER, subject TEXT, date TEXT, grade TEXT, reason TEXT)""")
+        try:
+            await db.execute("ALTER TABLE homework ADD COLUMN due_date TEXT")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE schedule ADD COLUMN hidden INTEGER DEFAULT 0")
+        except Exception:
+            pass
         await db.commit()
 
-# ---------- ЗАГРУЗКА РАСПИСАНИЯ (стирает старое и заливает заново) ----------
+# ---------- ЗАГРУЗКА РАСПИСАНИЯ (доливает недостающее, удаления не возвращает) ----------
 async def reseed_schedule(user_id):
     async with aiosqlite.connect(DB) as db:
-        await db.execute("DELETE FROM schedule WHERE user_id=?", (user_id,))
-        await db.executemany(
-            """INSERT INTO schedule (user_id, day, week_type, time, subject, lesson_type, room, teacher)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            [(user_id, d, w, t, s, lt, r, te) for d, w, t, s, lt, r, te in SEED_DATA]
-        )
+        for d, w, t, s, lt, r, te in SEED_DATA:
+            async with db.execute("""SELECT id FROM schedule WHERE user_id=? AND day=? AND week_type=?
+                AND time=? AND subject=?""",
+                (user_id, d, w, t, s)) as cur:
+                row = await cur.fetchone()
+            if not row:
+                await db.execute(
+                    """INSERT INTO schedule (user_id, day, week_type, time, subject, lesson_type, room, teacher, hidden)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                    (user_id, d, w, t, s, lt, r, te))
         await db.commit()
 
 # ---------- СТАРТ: команда и кнопка ----------
-async def do_start(user_id, lang):
-    await reseed_schedule(user_id)
-    name = "" # имя подтянем снаружи
-    return name
-
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -511,24 +526,33 @@ async def toggle_lang(message: types.Message, state: FSMContext):
     await set_lang(message.from_user.id, new_lang)
     await message.answer(T(new_lang, "lang_switched"), reply_markup=main_menu_kb(new_lang))
 
-# ---------- ДЕНЬ (пары всегда по часам, с номерами) ----------
+# ---------- ДЕНЬ ----------
 async def build_day_view(user_id, target_date, lang):
     day_ru = DAY_NAMES["ru"][target_date.weekday()]
     week_type = get_week_type(target_date)
+    date_str = f"{target_date.day} {MONTHS[lang][target_date.month - 1]}"
     async with aiosqlite.connect(DB) as db:
         async with db.execute("""SELECT id, time, subject, lesson_type, room, teacher, note FROM schedule
-            WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую')""",
+            WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую') AND (hidden IS NULL OR hidden=0)""",
             (user_id, day_ru, week_type)) as cur:
             lessons = await cur.fetchall()
-        async with db.execute("SELECT id, subject, task, photo_id, done FROM homework WHERE user_id=?", (user_id,)) as cur:
-            all_hws = await cur.fetchall()
+        async with db.execute("""SELECT id, subject, task, photo_id, done FROM homework
+            WHERE user_id=? AND due_date=?""",
+            (user_id, target_date.date().isoformat())) as cur:
+            day_hws = await cur.fetchall()
 
+    hw_map = {}
+    for h in day_hws:
+        hw_map.setdefault(h[1], h)
     lessons = sorted(lessons, key=lambda l: time_sort_key(l[1]))
 
-    if not lessons:
-        return T(lang, "day_head", day=DAY_NAMES[lang][target_date.weekday()], week=wd(week_type, lang)) + "\n\n" + T(lang, "no_lessons"), []
+    head = T(lang, "day_head_date", day=DAY_NAMES[lang][target_date.weekday()],
+             week=wd(week_type, lang), date=date_str)
 
-    text = T(lang, "day_head", day=DAY_NAMES[lang][target_date.weekday()], week=wd(week_type, lang)) + "\n\n"
+    if not lessons:
+        return head + "\n\n" + T(lang, "no_lessons"), []
+
+    text = head + "\n\n"
     buttons = []
     for num, (lesson_id, time_, subj, l_type, room, teacher, note) in enumerate(lessons, 1):
         emoji = subject_emoji(subj)
@@ -540,21 +564,15 @@ async def build_day_view(user_id, target_date, lang):
             text += f" | 🦋 {esc(teacher)}"
         text += "\n"
 
-        subj_l = subj.lower()
-        for hw_id, hw_subj, hw_task, hw_photo, hw_done in all_hws:
-            ws = hw_subj.lower()
-            if ws in subj_l or any(w.lower() in subj_l for w in ws.split()):
-                task = esc(hw_task)
-                if hw_done:
-                    text += "   " + T(lang, "hw_done", task=task) + "\n"
-                else:
-                    text += "   " + T(lang, "hw", task=task) + "\n"
-                    if hw_photo:
-                        text += "   " + T(lang, "photo_lbl") + "\n"
-                    buttons.append((T(lang, "btn_done", s=hw_subj[:15]), f"hwdone_{hw_id}"))
-                    if hw_photo:
-                        buttons.append((T(lang, "btn_photo", s=hw_subj[:12]), f"hwphoto_{hw_id}"))
-                break
+        if subj in hw_map:
+            hw_id, hw_subj, hw_task, hw_photo, hw_done = hw_map[subj]
+            if hw_done:
+                text += f"   🔳 {esc(hw_task)}\n"
+            else:
+                text += f"   🔲 {esc(hw_task)}\n"
+                buttons.append((T(lang, "btn_done", s=subj[:15]), f"hwdone_{hw_id}"))
+                if hw_photo:
+                    buttons.append((T(lang, "btn_photo"), f"hwphoto_{hw_id}"))
 
         if note:
             text += "   " + T(lang, "note_lbl", note=esc(note)) + "\n"
@@ -576,16 +594,32 @@ async def sched_today_msg(message: types.Message, state: FSMContext = None):
     if state:
         await state.clear()
     lang = await get_lang(message.from_user.id)
-    text, buttons = await build_day_view(message.from_user.id, datetime.now(), lang)
-    await message.answer(text + "\n" + phrase(lang, "closings"), reply_markup=buttons_to_kb(buttons, lang), parse_mode="HTML")
+    now = datetime.now()
+    text, buttons = await build_day_view(message.from_user.id, now, lang)
+    lessons, week_type = await get_day_lessons(message.from_user.id, now)
+    try:
+        photo = await make_day_card(DAY_NAMES[lang][now.weekday()], wd(week_type, lang), lessons, lang, message.from_user.id)
+        await message.answer_photo(photo, caption=text + "\n" + phrase(lang, "closings"),
+                                   reply_markup=buttons_to_kb(buttons, lang), parse_mode="HTML")
+    except Exception:
+        await message.answer(text + "\n" + phrase(lang, "closings"),
+                             reply_markup=buttons_to_kb(buttons, lang), parse_mode="HTML")
 
 @dp.message(F.text.in_({MENU["tomorrow"]["ru"], MENU["tomorrow"]["en"]}))
 async def sched_tomorrow_msg(message: types.Message, state: FSMContext = None):
     if state:
         await state.clear()
     lang = await get_lang(message.from_user.id)
-    text, buttons = await build_day_view(message.from_user.id, datetime.now() + timedelta(days=1), lang)
-    await message.answer(text + "\n" + phrase(lang, "closings"), reply_markup=buttons_to_kb(buttons, lang), parse_mode="HTML")
+    tmrw = datetime.now() + timedelta(days=1)
+    text, buttons = await build_day_view(message.from_user.id, tmrw, lang)
+    lessons, week_type = await get_day_lessons(message.from_user.id, tmrw)
+    try:
+        photo = await make_day_card(DAY_NAMES[lang][tmrw.weekday()], wd(week_type, lang), lessons, lang, message.from_user.id)
+        await message.answer_photo(photo, caption=text + "\n" + phrase(lang, "closings"),
+                                   reply_markup=buttons_to_kb(buttons, lang), parse_mode="HTML")
+    except Exception:
+        await message.answer(text + "\n" + phrase(lang, "closings"),
+                             reply_markup=buttons_to_kb(buttons, lang), parse_mode="HTML")
 
 # ---------- НЕДЕЛЯ ----------
 async def build_week_view(user_id, offset, lang):
@@ -596,14 +630,15 @@ async def build_week_view(user_id, offset, lang):
         for i in range(7):
             d = monday + timedelta(days=i)
             day_ru = DAY_NAMES["ru"][i]
+            date_str = f"{d.day} {MONTHS[lang][d.month - 1]}"
             async with db.execute("""SELECT time, subject, lesson_type, room FROM schedule
-                WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую')""",
+                WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую') AND (hidden IS NULL OR hidden=0)""",
                 (user_id, day_ru, get_week_type(d))) as cur:
                 lessons = await cur.fetchall()
             lessons = sorted(lessons, key=lambda l: time_sort_key(l[0]))
             if lessons:
                 empty = False
-                text += f"📅 <b>{DAY_NAMES[lang][i]}:</b>\n"
+                text += f"📅 <b>{DAY_NAMES[lang][i]}, {date_str}:</b>\n"
                 for num, l in enumerate(lessons, 1):
                     emoji = subject_emoji(l[1])
                     text += f"   {num}. {esc(l[0])} — {emoji} {esc(l[1])} ({esc(l[2])})"
@@ -648,39 +683,51 @@ async def sched_week_cb(callback: types.CallbackQuery):
 async def add_hw_start(message: types.Message, state: FSMContext):
     lang = await get_lang(message.from_user.id)
     await state.set_state(BotStates.waiting_for_hw_text)
-    await message.answer(phrase(lang, "hw") + T(lang, "hw_start"))
+    await message.answer(phrase(lang, "hw") + T(lang, "hw_prompt"))
 
-async def save_hw(user_id: int, hw_text: str, photos: list):
-    words = []
-    for w in hw_text.split():
-        w = w.strip(string.punctuation).lower()
-        if len(w) > 4:
-            words.append(w[:5])
+async def save_hw(user_id, hw_text, photos, subject_override=None):
+    now = datetime.now()
+    target_subject = subject_override
+    target_date = None
 
-    nearest = None
-    today = datetime.now()
     async with aiosqlite.connect(DB) as db:
-        for i in range(8):
-            d = today + timedelta(days=i)
+        if not target_subject:
+            words = [w.strip(string.punctuation).lower()[:5] for w in hw_text.split() if len(w) > 4]
+
+        for i in range(14):
+            d = now + timedelta(days=i)
             day_name = DAY_NAMES["ru"][d.weekday()]
-            for w in words:
-                async with db.execute("""SELECT subject, lesson_type FROM schedule
-                    WHERE user_id=? AND day=? AND lower(subject) LIKE ?""",
-                    (user_id, day_name, f"%{w}%")) as cur:
-                    rows = await cur.fetchall()
-                for r in rows:
-                    lt = (r[1] or "").lower()
-                    if "семинар" in lt or "seminar" in lt:
-                        nearest = r[0]
+            async with db.execute("""SELECT time, subject, lesson_type FROM schedule
+                WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую') AND (hidden IS NULL OR hidden=0)""",
+                (user_id, day_name, get_week_type(d))) as cur:
+                rows = await cur.fetchall()
+            rows = sorted(rows, key=lambda r: time_sort_key(r[0]))
+
+            for time_, subj, lt in rows:
+                if target_subject:
+                    if subj.lower() == target_subject.lower():
+                        target_date = d.date()
                         break
-                if nearest:
-                    break
-            if nearest:
+                else:
+                    if "семинар" not in (lt or "").lower() and "seminar" not in (lt or "").lower():
+                        continue
+                    if any(w in subj.lower() for w in words):
+                        m = re.match(r"(\d{1,2}):(\d{2})", time_)
+                        if i == 0 and m and (int(m.group(1)), int(m.group(2))) <= (now.hour, now.minute):
+                            continue
+                        target_date = d.date()
+                        target_subject = subj
+                        break
+            if target_date:
                 break
-        if not nearest:
+
+        if not target_subject:
             return None
-        cur = await db.execute("INSERT INTO homework (user_id, subject, task, photo_id) VALUES (?, ?, ?, ?)",
-            (user_id, nearest, hw_text, ",".join(photos) if photos else None))
+
+        cur = await db.execute(
+            """INSERT INTO homework (user_id, subject, task, photo_id, due_date)
+            VALUES (?, ?, ?, ?, ?)""",
+            (user_id, target_subject, hw_text, ",".join(photos) if photos else None, target_date.isoformat()))
         await db.commit()
         return cur.lastrowid
 
@@ -689,14 +736,33 @@ async def add_hw_text(message: types.Message, state: FSMContext):
     if await check_menu(message, state):
         return
     lang = await get_lang(message.from_user.id)
-    hw_id = await save_hw(message.from_user.id, message.text, [])
+    text = message.text.strip()
+
+    subject_override = None
+    task_text = text
+
+    if ":" in text:
+        parts = text.split(":", 1)
+        candidate = parts[0].strip().lower()
+        for d, w, t, s, lt, r, te in SEED_DATA:
+            if candidate and candidate in s.lower():
+                subject_override = s
+                break
+        if subject_override:
+            task_text = parts[1].strip()
+        else:
+            await message.answer(T(lang, "hw_bad_subject"))
+            return
+
+    hw_id = await save_hw(message.from_user.id, task_text, [], subject_override)
     if hw_id is None:
         await state.clear()
         await message.answer(T(lang, "hw_not_found"))
         return
+
     await state.update_data(hw_id=hw_id, photos=[])
     PHOTO_COUNTS[message.from_user.id] = 0
-    await message.answer(T(lang, "hw_saved"))
+    await message.answer(T(lang, "hw_saved", s=subject_override or "предмет"))
     await state.set_state(BotStates.waiting_for_hw_photo)
 
 async def photo_reply_later(user_id: int, chat_id: int, lang: str):
@@ -799,64 +865,217 @@ async def hw_photos(callback: types.CallbackQuery):
 async def hw_list(message: types.Message):
     lang = await get_lang(message.from_user.id)
     async with aiosqlite.connect(DB) as db:
-        async with db.execute("SELECT id, subject, task, photo_id, done FROM homework WHERE user_id=? ORDER BY id DESC", (message.from_user.id,)) as cur:
+        async with db.execute("""SELECT id, subject, task, photo_id, done, due_date
+            FROM homework WHERE user_id=?""", (message.from_user.id,)) as cur:
             rows = await cur.fetchall()
+
     if not rows:
         await message.answer(T(lang, "hw_none"))
         return
+
+    with_date = [r for r in rows if r[5]]
+    without_date = [r for r in rows if not r[5]]
+    with_date.sort(key=lambda r: (r[5], r[0]))
+    rows = with_date + without_date
+
     text = T(lang, "hw_head") + "\n\n"
     buttons = []
-    for hw_id, subj, task, photo, done in rows:
+    last_due = None
+
+    for hw_id, subj, task, photo, done, due in rows:
+        if due != last_due:
+            if due:
+                try:
+                    dd = datetime.fromisoformat(due)
+                    text += f"📅 <b>{DAY_NAMES[lang][dd.weekday()]}, {dd.day} {MONTHS[lang][dd.month - 1]}</b>\n"
+                except Exception:
+                    pass
+            elif with_date or last_due is not None:
+                text += "📅 <b>Без даты</b>\n" if lang == "ru" else "📅 <b>No date</b>\n"
+            last_due = due
+
         emoji = subject_emoji(subj)
         if done:
-            text += f"<s>▪️ {emoji} {esc(subj)}: {esc(task)}</s>\n"
+            text += f"  <s>▪️ {emoji} <b>{esc(subj)}</b> — {esc(task)}</s>\n"
             buttons.append((T(lang, "btn_undo", s=subj[:15]), f"hwdone_{hw_id}"))
         else:
-            text += f"▪️ {emoji} {esc(subj)}: {esc(task)}\n"
+            text += f"  ▪️ {emoji} <b>{esc(subj)}</b> — {esc(task)}\n"
             buttons.append((T(lang, "btn_done", s=subj[:15]), f"hwdone_{hw_id}"))
         if photo:
-            buttons.append((T(lang, "btn_photo", s=subj[:12]), f"hwphoto_{hw_id}"))
+            buttons.append((T(lang, "btn_photo"), f"hwphoto_{hw_id}"))
+
     await message.answer(text + "\n" + phrase(lang, "hw"), reply_markup=buttons_to_kb(buttons, lang), parse_mode="HTML")
 
-# ---------- ЗАМЕТКИ ----------
+# ---------- ЗАМЕТОЧКИ ----------
+N_ACTIONS = {
+    "add":  {"ru": "➕ Добавить заметочку", "en": "➕ Add a note"},
+    "edit": {"ru": "✏️ Изменить заметочку", "en": "✏️ Edit a note"},
+    "del":  {"ru": "🗑 Удалить заметочку",  "en": "🗑 Delete a note"},
+}
+N_TITLES = {
+    "add":  {"ru": "➕ К какой дисциплине добавить заметочку?", "en": "➕ Which subject gets a note?"},
+    "edit": {"ru": "✏️ У какой дисциплины поправить заметочку?", "en": "✏️ Which subject to edit?"},
+    "del":  {"ru": "🗑 Из какой дисциплины удалить заметочку?",  "en": "🗑 Which subject to delete from?"},
+}
+
+def n_title(lang, action):
+    return N_TITLES[action][lang]
+
 @dp.message(F.text.in_({MENU["note"]["ru"], MENU["note"]["en"]}))
 async def note_start(message: types.Message, state: FSMContext = None):
     if state:
         await state.clear()
     lang = await get_lang(message.from_user.id)
     b = InlineKeyboardBuilder()
-    for i in range(7):
-        b.button(text=DAYS_SHORT[lang][i], callback_data=f"nday_{i}")
-    b.button(text=T(lang, "btn_back"), callback_data="back_to_main")
-    b.adjust(4, 3, 1)
-    await message.answer(T(lang, "note_day"), reply_markup=b.as_markup())
-
-@dp.callback_query(F.data.startswith("nday_"))
-async def note_day(callback: types.CallbackQuery):
-    lang = await get_lang(callback.from_user.id)
-    day_index = int(callback.data.split("_")[1])
-    day_ru = DAY_NAMES["ru"][day_index]
-    async with aiosqlite.connect(DB) as db:
-        async with db.execute("SELECT id, time, subject, lesson_type FROM schedule WHERE user_id=? AND day=?",
-            (callback.from_user.id, day_ru)) as cur:
-            lessons = await cur.fetchall()
-    lessons = sorted(lessons, key=lambda l: time_sort_key(l[1]))
-    if not lessons:
-        await callback.answer(T(lang, "note_none"))
-        return
-    b = InlineKeyboardBuilder()
-    for lid, t, subj, ltype in lessons:
-        b.button(text=f"{t} {subj} ({ltype})", callback_data=f"addnote_{lid}")
+    for key in ("add", "edit", "del"):
+        b.button(text=N_ACTIONS[key][lang], callback_data=f"nmenu_{key}")
     b.button(text=T(lang, "btn_back"), callback_data="back_to_main")
     b.adjust(1)
-    await callback.message.edit_text(T(lang, "note_choose", day=DAY_NAMES[lang][day_index]), reply_markup=b.as_markup())
+    await message.answer("🌼 Заметочки — выбирай:" if lang == "ru" else "🌼 Notes — pick one:", reply_markup=b.as_markup())
+
+@dp.callback_query(F.data == "nmenu_back")
+async def note_menu_cb(callback: types.CallbackQuery):
+    lang = await get_lang(callback.from_user.id)
+    b = InlineKeyboardBuilder()
+    for key in ("add", "edit", "del"):
+        b.button(text=N_ACTIONS[key][lang], callback_data=f"nmenu_{key}")
+    b.button(text=T(lang, "btn_back"), callback_data="back_to_main")
+    b.adjust(1)
+    await callback.message.edit_text(
+        "🌼 Заметочки — выбирай:" if lang == "ru" else "🌼 Notes — pick one:",
+        reply_markup=b.as_markup())
     await callback.answer()
 
-@dp.callback_query(F.data.startswith("addnote_"))
-async def add_note(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("nmenu_"))
+async def note_action(callback: types.CallbackQuery):
     lang = await get_lang(callback.from_user.id)
-    await state.update_data(note_id=callback.data.split("_")[1])
-    await callback.message.answer(T(lang, "note_text"))
+    action = callback.data.split("_")[1]
+    subjects = await get_subjects(callback.from_user.id)
+    if not subjects:
+        await callback.answer("Сначала добавь пары в расписание ✨" if lang == "ru" else "Add lessons first ✨")
+        return
+    b = InlineKeyboardBuilder()
+    for i, subj in enumerate(subjects):
+        b.button(text=f"{subject_emoji(subj)} {subj}", callback_data=f"nsub_{action}_{i}")
+    b.button(text=T(lang, "btn_back"), callback_data="nmenu_back")
+    b.adjust(1)
+    await callback.message.edit_text(n_title(lang, action), reply_markup=b.as_markup())
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("nback_"))
+async def note_back_to_subjects(callback: types.CallbackQuery):
+    lang = await get_lang(callback.from_user.id)
+    action = callback.data.split("_")[1]
+    subjects = await get_subjects(callback.from_user.id)
+    b = InlineKeyboardBuilder()
+    for i, subj in enumerate(subjects):
+        b.button(text=f"{subject_emoji(subj)} {subj}", callback_data=f"nsub_{action}_{i}")
+    b.button(text=T(lang, "btn_back"), callback_data="nmenu_back")
+    b.adjust(1)
+    await callback.message.edit_text(n_title(lang, action), reply_markup=b.as_markup())
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("nsub_"))
+async def note_subject_pick(callback: types.CallbackQuery):
+    _, action, idx = callback.data.split("_")
+    subjects = await get_subjects(callback.from_user.id)
+    subject = subjects[int(idx)]
+    await show_note_week(callback, action, subject, int(idx), 0)
+
+@dp.callback_query(F.data.startswith("nweek_"))
+async def note_week_nav(callback: types.CallbackQuery):
+    _, action, idx, offset = callback.data.split("_")
+    subjects = await get_subjects(callback.from_user.id)
+    subject = subjects[int(idx)]
+    await show_note_week(callback, action, subject, int(idx), int(offset))
+
+async def show_note_week(callback: types.CallbackQuery, action: str, subject: str, idx: int, offset: int):
+    user_id = callback.from_user.id
+    lang = await get_lang(user_id)
+    monday = datetime.now() - timedelta(days=datetime.now().weekday()) + timedelta(weeks=offset)
+    text = f"🗓 <b>{esc(subject)}</b> — {wd(get_week_type(monday), lang)} неделя\n"
+    text += ("Нажимай на пары своей дисциплины — там заметочка ✨\n\n" if lang == "ru"
+             else "Tap your subject's lessons — that's where the note goes ✨\n\n")
+    buttons = []
+    any_lesson = False
+    async with aiosqlite.connect(DB) as db:
+        for i in range(7):
+            d = monday + timedelta(days=i)
+            day_ru = DAY_NAMES["ru"][i]
+            date_str = f"{d.day} {MONTHS[lang][d.month - 1]}"
+            async with db.execute("""SELECT id, time, subject, lesson_type, note FROM schedule
+                WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую') AND (hidden IS NULL OR hidden=0)""",
+                (user_id, day_ru, get_week_type(d))) as cur:
+                lessons = await cur.fetchall()
+            lessons = sorted(lessons, key=lambda l: time_sort_key(l[1]))
+            if lessons:
+                text += f"📅 <b>{DAY_NAMES[lang][i]}, {date_str}:</b>\n"
+                for num, (lid, t, s, lt, note) in enumerate(lessons, 1):
+                    if s == subject:
+                        any_lesson = True
+                        if note:
+                            short = esc(note[:40]) + ("…" if len(note) > 40 else "")
+                            text += f"   {num}. {esc(t)} — 💌 {short}\n"
+                            buttons.append((f"↩️ {num}. {t[:5]}", f"nslot_{action}_{lid}"))
+                        else:
+                            text += f"   {num}. {esc(t)} — {esc(lt)}\n"
+                            buttons.append((f"💌 {num}. {t[:5]}", f"nslot_{action}_{lid}"))
+                    else:
+                        text += f"   {num}. (—)\n"
+                text += "\n"
+    if not any_lesson:
+        text += ("У этой дисциплины на этой неделе пар нет 🙈\n\n" if lang == "ru"
+                 else "No lessons of this subject this week 🙈\n\n")
+    b = InlineKeyboardBuilder()
+    for label, data in buttons:
+        b.button(text=label, callback_data=data)
+    b.button(text="⬅️ Пред. неделя" if lang == "ru" else "⬅️ Prev", callback_data=f"nweek_{action}_{idx}_{offset-1}")
+    b.button(text="След. неделя ➡️" if lang == "ru" else "Next ➡️", callback_data=f"nweek_{action}_{idx}_{offset+1}")
+    b.button(text="◀️ Другая дисциплина" if lang == "ru" else "◀️ Another subject", callback_data=f"nback_{action}")
+    b.button(text=T(lang, "btn_back"), callback_data="nmenu_back")
+    b.adjust(3, 2)
+    try:
+        await callback.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=b.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("nslot_"))
+async def note_slot_pick(callback: types.CallbackQuery, state: FSMContext):
+    lang = await get_lang(callback.from_user.id)
+    _, action, lid = callback.data.split("_")
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT subject, note FROM schedule WHERE id=?", (lid,)) as cur:
+            row = await cur.fetchone()
+    if not row:
+        await callback.answer(T(lang, "edit_gone"))
+        return
+    subj, note = row
+
+    if action == "add" and note:
+        await callback.answer(
+            "Тут уже есть заметочка 💕 Хочешь её поменять — выбери «✏️ Изменить заметочку»" if lang == "ru"
+            else "A note already exists here 💕 Use «✏️ Edit a note»")
+        return
+    if action in ("edit", "del") and not note:
+        await callback.answer("Тут пока нет заметочки 🙈" if lang == "ru" else "No note here yet 🙈")
+        return
+    if action == "del":
+        async with aiosqlite.connect(DB) as db:
+            await db.execute("UPDATE schedule SET note=NULL WHERE id=?", (lid,))
+            await db.commit()
+        await callback.answer("🗑 Заметочка удалена" if lang == "ru" else "🗑 Note deleted")
+        return
+
+    await state.update_data(note_id=lid, note_mode=action)
+    if action == "edit":
+        await callback.message.answer(
+            f"Текущая заметочка:\n«{esc(note)}»\n\nНапиши новую:\n(«Отмена» — передумать)" if lang == "ru"
+            else f"Current note:\n«{esc(note)}»\n\nType the new one:\n(«Cancel» to abort)")
+    else:
+        await callback.message.answer(
+            "Отлично, добавляем заметочку! Напиши её текст:\n(«Отмена» — передумать)" if lang == "ru"
+            else "Adding a note! Type its text:\n(«Cancel» to abort)")
     await state.set_state(BotStates.waiting_for_note)
     await callback.answer()
 
@@ -872,7 +1091,28 @@ async def save_note(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(T(lang, "note_saved"))
 
-# ---------- НАСТРОЙКА НЕДЕЛЬКИ (добавление пар) ----------
+@dp.callback_query(F.data.startswith("addnote_"))
+async def add_note(callback: types.CallbackQuery, state: FSMContext):
+    lang = await get_lang(callback.from_user.id)
+    lid = callback.data.split("_")[1]
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("SELECT note FROM schedule WHERE id=?", (lid,)) as cur:
+            r = await cur.fetchone()
+    note = r[0] if r else None
+    mode = "edit" if note else "add"
+    await state.update_data(note_id=lid, note_mode=mode)
+    if note:
+        await callback.message.answer(
+            f"Текущая заметочка:\n«{esc(note)}»\n\nНапиши новую:\n(«Отмена» — передумать)" if lang == "ru"
+            else f"Current note:\n«{esc(note)}»\n\nType the new one:\n(«Cancel» to abort)")
+    else:
+        await callback.message.answer(
+            "Отлично, добавляем заметочку! Напиши её текст:\n(«Отмена» — передумать)" if lang == "ru"
+            else "Adding a note! Type its text:\n(«Cancel» to abort)")
+    await state.set_state(BotStates.waiting_for_note)
+    await callback.answer()
+
+# ---------- НАСТРОЙКА НЕДЕЛЬКИ ----------
 @dp.message(F.text.in_({MENU["setup"]["ru"], MENU["setup"]["en"]}))
 async def setup_schedule(message: types.Message):
     lang = await get_lang(message.from_user.id)
@@ -974,12 +1214,13 @@ async def edit_day(callback: types.CallbackQuery):
     day_index = int(callback.data.split("_")[1])
     day_ru = DAY_NAMES["ru"][day_index]
     async with aiosqlite.connect(DB) as db:
-        async with db.execute("SELECT id, time, subject, lesson_type, week_type FROM schedule WHERE user_id=? AND day=?",
+        async with db.execute("""SELECT id, time, subject, lesson_type, week_type FROM schedule
+            WHERE user_id=? AND day=? AND (hidden IS NULL OR hidden=0)""",
             (callback.from_user.id, day_ru)) as cur:
             lessons = await cur.fetchall()
     lessons = sorted(lessons, key=lambda l: time_sort_key(l[1]))
     if not lessons:
-        await callback.answer(T(lang, "note_none"))
+        await callback.answer("В этот день пар нет ✨" if lang == "ru" else "No lessons on this day ✨")
         return
     b = InlineKeyboardBuilder()
     for lid, t, subj, ltype, wt in lessons:
@@ -1079,7 +1320,7 @@ async def del_lesson(callback: types.CallbackQuery):
     async with aiosqlite.connect(DB) as db:
         async with db.execute("SELECT day FROM schedule WHERE id=?", (lid,)) as cur:
             row = await cur.fetchone()
-        await db.execute("DELETE FROM schedule WHERE id=?", (lid,))
+        await db.execute("UPDATE schedule SET hidden=1 WHERE id=?", (lid,))
         await db.commit()
     await callback.answer(T(lang, "deleted"))
     if row:
@@ -1167,6 +1408,286 @@ async def todo_del(callback: types.CallbackQuery):
     await callback.answer(T(lang, "deleted"))
     await todo_list_render(callback.message.chat.id, callback.from_user.id, lang, callback=callback)
 
+# ---------- ОЦЕНОЧКИ ----------
+GR_ACTIONS = {
+    "view": {"ru": "👀 Просмотреть оценочки", "en": "👀 View grades"},
+    "add":  {"ru": "➕ Добавить оценочку",     "en": "➕ Add grade"},
+    "edit": {"ru": "✏️ Изменить оценочку",    "en": "✏️ Edit grade"},
+    "del":  {"ru": "🗑 Удалить оценочку",     "en": "🗑 Delete grade"},
+}
+GR_TITLES = {
+    "view": {"ru": "👀 Какую дисциплину посмотреть?", "en": "👀 Which subject to view?"},
+    "add":  {"ru": "➕ К какой дисциплине добавить оценочку?", "en": "➕ Which subject to add a grade to?"},
+    "edit": {"ru": "✏️ В какой дисциплине поправить?", "en": "✏️ Which subject to edit?"},
+    "del":  {"ru": "🗑 Из какой дисциплины удалить?", "en": "🗑 Which subject to delete from?"},
+}
+
+async def get_subjects(user_id):
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("""SELECT subject, day, time FROM schedule
+            WHERE user_id=? AND (hidden IS NULL OR hidden=0)""", (user_id,)) as cur:
+            rows = await cur.fetchall()
+    seen = []
+    for subj, day, time_ in sorted(rows, key=lambda r: (DAY_NAMES["ru"].index(r[1]), time_sort_key(r[2]))):
+        if subj not in seen:
+            seen.append(subj)
+    return seen
+
+async def get_subject_lessons(user_id, subject):
+    out = []
+    now = datetime.now()
+    async with aiosqlite.connect(DB) as db:
+        for i in range(14):
+            d = now + timedelta(days=i)
+            day_ru = DAY_NAMES["ru"][d.weekday()]
+            async with db.execute("""SELECT time, lesson_type, room FROM schedule
+                WHERE user_id=? AND day=? AND subject=? AND (hidden IS NULL OR hidden=0)
+                AND (week_type=? OR week_type='Каждую')""",
+                (user_id, day_ru, subject, get_week_type(d))) as cur:
+                rows = await cur.fetchall()
+            for time_, ltype, room in sorted(rows, key=lambda x: time_sort_key(x[0])):
+                if i == 0:
+                    m = re.match(r"(\d{1,2}):(\d{2})", time_ or "")
+                    if m and (int(m.group(1)), int(m.group(2))) <= (now.hour, now.minute):
+                        continue
+                out.append((d, time_, ltype, room))
+    return out
+
+def grades_table(lang, subj, rows):
+    emoji = subject_emoji(subj)
+    head = f"{emoji} <b>{esc(subj)}</b>\n"
+    if not rows:
+        return head + ("\nОценочек пока нет ✨" if lang == "ru" else "\nNo grades yet ✨")
+    d_w, day_w, g_w = 6, 4, 6
+    reasons = [r[2] for r in rows if r[2]]
+    r_w = max(max(len(x) for x in reasons), 4) if reasons else 4
+    lines = ["Дата   День  Оценка  За что", "─" * (d_w + day_w + g_w + r_w + 4)]
+    for due, grade, reason in rows:
+        try:
+            dd = datetime.fromisoformat(due)
+            ds = dd.strftime("%d.%m")
+            dys = DAYS_SHORT[lang][dd.weekday()]
+        except Exception:
+            ds, dys = "—", "—"
+        rs = reason if reason else "—"
+        lines.append(f"{ds:<{d_w}} {dys:<{day_w}} {grade:<{g_w}} {rs}")
+    return head + "\n<pre>" + html.escape("\n".join(lines)) + "</pre>"
+
+@dp.message(F.text.in_({MENU["grades"]["ru"], MENU["grades"]["en"]}))
+async def grades_menu(message: types.Message, state: FSMContext):
+    await state.clear()
+    lang = await get_lang(message.from_user.id)
+    b = InlineKeyboardBuilder()
+    for key in ("view", "add", "edit", "del"):
+        b.button(text=GR_ACTIONS[key][lang], callback_data=f"gmenu_{key}")
+    b.button(text=T(lang, "btn_back"), callback_data="back_to_main")
+    b.adjust(1)
+    title = "🎀 Мои оценочки — выбирай:" if lang == "ru" else "🎀 My grades — pick one:"
+    await message.answer(title, reply_markup=b.as_markup())
+
+@dp.callback_query(F.data == "gmenu_back")
+async def grades_menu_cb(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    lang = await get_lang(callback.from_user.id)
+    b = InlineKeyboardBuilder()
+    for key in ("view", "add", "edit", "del"):
+        b.button(text=GR_ACTIONS[key][lang], callback_data=f"gmenu_{key}")
+    b.button(text=T(lang, "btn_back"), callback_data="back_to_main")
+    b.adjust(1)
+    await callback.message.edit_text(
+        "🎀 Мои оценочки — выбирай:" if lang == "ru" else "🎀 My grades — pick one:",
+        reply_markup=b.as_markup())
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("gmenu_"))
+async def grades_action(callback: types.CallbackQuery, state: FSMContext):
+    lang = await get_lang(callback.from_user.id)
+    action = callback.data.split("_")[1]
+    subjects = await get_subjects(callback.from_user.id)
+    if not subjects:
+        await callback.answer("Сначала добавь пары в расписание ✨" if lang == "ru" else "Add lessons first ✨")
+        return
+    b = InlineKeyboardBuilder()
+    for i, subj in enumerate(subjects):
+        b.button(text=f"{subject_emoji(subj)} {subj}", callback_data=f"gsub_{action}_{i}")
+    b.button(text=T(lang, "btn_back"), callback_data="gmenu_back")
+    b.adjust(1)
+    await callback.message.edit_text(GR_TITLES[action][lang], reply_markup=b.as_markup())
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("gsub_"))
+async def grades_subject(callback: types.CallbackQuery, state: FSMContext):
+    lang = await get_lang(callback.from_user.id)
+    _, action, idx = callback.data.split("_")
+    subjects = await get_subjects(callback.from_user.id)
+    subject = subjects[int(idx)]
+
+    if action == "view":
+        async with aiosqlite.connect(DB) as db:
+            async with db.execute("""SELECT date, grade, reason FROM grades
+                WHERE user_id=? AND subject=? ORDER BY date, id""",
+                (callback.from_user.id, subject)) as cur:
+                rows = await cur.fetchall()
+        await callback.message.edit_text(grades_table(lang, subject, rows), parse_mode="HTML")
+        await callback.answer()
+        return
+
+    if action == "add":
+        await state.update_data(gr_subject=subject)
+        lessons = await get_subject_lessons(callback.from_user.id, subject)
+        if not lessons:
+            await callback.answer("У этой дисциплины больше нет ближайших пар 🙈" if lang == "ru" else "No upcoming lessons 🙈")
+            return
+        await state.update_data(gr_lessons=[l[0].isoformat() for l in lessons])
+        b = InlineKeyboardBuilder()
+        for i, (d, time_, ltype, room) in enumerate(lessons):
+            label = f"{DAY_NAMES[lang][d.weekday()]}, {d.day} {MONTHS[lang][d.month - 1]} · {time_}"
+            b.button(text=label, callback_data=f"gles_{i}")
+        b.button(text=T(lang, "btn_back"), callback_data="gmenu_back")
+        b.adjust(1)
+        head = (f"📅 <b>{esc(subject)}</b> — ближайшие пары. На какую оценочка?"
+                if lang == "ru" else f"📅 <b>{esc(subject)}</b> — upcoming lessons. For which one?")
+        await callback.message.edit_text(head, reply_markup=b.as_markup(), parse_mode="HTML")
+        await callback.answer()
+        return
+
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("""SELECT id, date, grade, reason FROM grades
+            WHERE user_id=? AND subject=? ORDER BY date, id""",
+            (callback.from_user.id, subject)) as cur:
+            rows = await cur.fetchall()
+    if not rows:
+        await callback.answer("Оценочек пока нет ✨" if lang == "ru" else "No grades yet ✨")
+        return
+    await state.update_data(gr_subject=subject)
+    b = InlineKeyboardBuilder()
+    for gid, due, grade, reason in rows:
+        try:
+            dd = datetime.fromisoformat(due)
+            label = f"{dd.strftime('%d.%m')} · {grade} · {(reason or '—')[:20]}"
+        except Exception:
+            label = f"{grade} · {(reason or '—')[:20]}"
+        b.button(text=label, callback_data=f"{'gedit' if action == 'edit' else 'gdel'}_{gid}")
+    b.button(text=T(lang, "btn_back"), callback_data="gmenu_back")
+    b.adjust(1)
+    await callback.message.edit_text(
+        (f"✏️ <b>{esc(subject)}</b> — выбери оценочку:" if lang == "ru"
+         else f"✏️ <b>{esc(subject)}</b> — pick a grade:"),
+        reply_markup=b.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("gles_"))
+async def grades_pick_lesson(callback: types.CallbackQuery, state: FSMContext):
+    lang = await get_lang(callback.from_user.id)
+    data = await state.get_data()
+    lessons = data.get("gr_lessons", [])
+    i = int(callback.data.split("_")[1])
+    await state.update_data(gr_date=lessons[i])
+    await callback.message.answer("Какая оценочка? (2–5)\n(«Отмена» — передумать)" if lang == "ru"
+                                  else "What grade? (2–5)\n(«Cancel» to abort)")
+    await state.set_state(BotStates.waiting_for_grade_value)
+    await callback.answer()
+
+@dp.message(BotStates.waiting_for_grade_value)
+async def grades_value(message: types.Message, state: FSMContext):
+    if await check_menu(message, state):
+        return
+    lang = await get_lang(message.from_user.id)
+    if message.text.strip() not in ("2", "3", "4", "5"):
+        await message.answer("Напиши оценку цифрой: 2, 3, 4 или 5 🙂" if lang == "ru"
+                             else "Type a digit: 2, 3, 4 or 5 🙂")
+        return
+    await state.update_data(gr_value=message.text.strip())
+    b = InlineKeyboardBuilder()
+    b.button(text="Без описания ✨" if lang == "ru" else "No description ✨", callback_data="gskip")
+    await message.answer("За что получила? Можно и пропустить 💕" if lang == "ru"
+                         else "What was it for? You can skip 💕", reply_markup=b.as_markup())
+    await state.set_state(BotStates.waiting_for_grade_reason)
+
+@dp.callback_query(F.data == "gskip")
+async def grades_skip(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("INSERT INTO grades (user_id, subject, date, grade, reason) VALUES (?, ?, ?, ?, ?)",
+            (callback.from_user.id, data["gr_subject"], data["gr_date"], data["gr_value"], None))
+        await db.commit()
+    await state.clear()
+    await callback.message.answer("✅ Оценочка добавлена! 🎀")
+    await callback.answer()
+
+@dp.message(BotStates.waiting_for_grade_reason)
+async def grades_reason(message: types.Message, state: FSMContext):
+    if await check_menu(message, state):
+        return
+    lang = await get_lang(message.from_user.id)
+    data = await state.get_data()
+    reason = None if message.text.strip().lower() in ("-", "нет", "no") else message.text.strip()
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("INSERT INTO grades (user_id, subject, date, grade, reason) VALUES (?, ?, ?, ?, ?)",
+            (message.from_user.id, data["gr_subject"], data["gr_date"], data["gr_value"], reason))
+        await db.commit()
+    await state.clear()
+    await message.answer("✅ Оценочка добавлена! 🎀" if lang == "ru" else "✅ Grade added! 🎀")
+
+@dp.callback_query(F.data.startswith("gedit_"))
+async def grades_edit_pick(callback: types.CallbackQuery, state: FSMContext):
+    lang = await get_lang(callback.from_user.id)
+    gid = int(callback.data.split("_")[1])
+    await state.update_data(gr_id=gid)
+    b = InlineKeyboardBuilder()
+    b.button(text="🔢 Оценка" if lang == "ru" else "🔢 Grade", callback_data=f"gfield_grade_{gid}")
+    b.button(text="💬 За что" if lang == "ru" else "💬 Reason", callback_data=f"gfield_reason_{gid}")
+    b.button(text=T(lang, "btn_back"), callback_data="gmenu_back")
+    b.adjust(1)
+    await callback.message.edit_text("Что меняем?" if lang == "ru" else "What to change?", reply_markup=b.as_markup())
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("gfield_"))
+async def grades_edit_field(callback: types.CallbackQuery, state: FSMContext):
+    lang = await get_lang(callback.from_user.id)
+    _, field, gid = callback.data.split("_")
+    await state.update_data(gr_field=field, gr_id=int(gid))
+    if lang == "ru":
+        hint = "Напиши новую оценку (2–5):" if field == "grade" else "Напиши, за что оценка (или «-» чтобы убрать):"
+        suffix = "\n(«Отмена» — передумать)"
+    else:
+        hint = "Type the new grade (2–5):" if field == "grade" else "Type what it was for (or «-» to clear):"
+        suffix = "\n(«Cancel» to abort)"
+    await callback.message.answer(hint + suffix)
+    await state.set_state(BotStates.waiting_for_grade_edit)
+    await callback.answer()
+
+@dp.message(BotStates.waiting_for_grade_edit)
+async def grades_edit_save(message: types.Message, state: FSMContext):
+    if await check_menu(message, state):
+        return
+    lang = await get_lang(message.from_user.id)
+    data = await state.get_data()
+    field, gid = data.get("gr_field"), data.get("gr_id")
+    if field == "grade":
+        if message.text.strip() not in ("2", "3", "4", "5"):
+            await message.answer("Оценка — это цифра: 2, 3, 4 или 5 🙂" if lang == "ru"
+                                 else "A grade is a digit: 2, 3, 4 or 5 🙂")
+            return
+        val = message.text.strip()
+    else:
+        val = None if message.text.strip().lower() in ("-", "нет", "no") else message.text.strip()
+    async with aiosqlite.connect(DB) as db:
+        await db.execute(f"UPDATE grades SET {field}=? WHERE id=?", (val, gid))
+        await db.commit()
+    await state.clear()
+    await message.answer("✅ Поправила! 🎀" if lang == "ru" else "✅ Updated! 🎀")
+
+@dp.callback_query(F.data.startswith("gdel_"))
+async def grades_del(callback: types.CallbackQuery):
+    lang = await get_lang(callback.from_user.id)
+    gid = int(callback.data.split("_")[1])
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("DELETE FROM grades WHERE id=?", (gid,))
+        await db.commit()
+    await callback.message.edit_text("🗑 Оценочка удалена" if lang == "ru" else "🗑 Grade deleted")
+    await callback.answer()
+
 # ---------- КНОПКИ МЕНЮ ВО ВРЕМЯ ВВОДА ----------
 async def check_menu(message: types.Message, state: FSMContext):
     key = MENU_BY_TEXT.get(message.text or "")
@@ -1186,6 +1707,8 @@ async def check_menu(message: types.Message, state: FSMContext):
             await note_start(message, state)
         elif key == "todo":
             await todo_list(message)
+        elif key == "grades":
+            await grades_menu(message, state)
         elif key == "hw_list":
             await hw_list(message)
         elif key == "setup":
@@ -1199,6 +1722,15 @@ async def check_menu(message: types.Message, state: FSMContext):
         await message.answer(T(lang, "cancel"), reply_markup=main_menu_kb(lang))
         return True
     return False
+
+# ---------- СВОЙ ФОН: пришли фото с подписью «фон» ----------
+@dp.message(F.photo)
+async def photo_bg_handler(message: types.Message):
+    caption = (message.caption or "").strip().lower()
+    if caption in ("фон", "background"):
+        BACKGROUNDS[message.from_user.id] = message.photo[-1].file_id
+        lang = await get_lang(message.from_user.id)
+        await message.answer(T(lang, "bg_saved"))
 
 # ---------- «МИЛЫЙ» РАЗГОВОР ----------
 @dp.message()
@@ -1217,6 +1749,169 @@ async def chat_chat(message: types.Message):
             pass
         return
     await message.answer(phrase(lang, "fallback"))
+
+# ---------- РОЗОВАЯ ФОТО-КАРТОЧКА РАСПИСАНИЯ ----------
+PINK_DARK = (128, 45, 82)
+PINK_ACCENT = (232, 96, 152)
+PINK_MUTED = (196, 120, 152)
+CARD_FILL = (255, 250, 252)
+CARD_LINE = (255, 178, 208)
+
+def _font(size, bold=False):
+    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    for path in ("/usr/share/fonts/truetype/dejavu/" + name,
+                 "/usr/share/fonts/dejavu/" + name):
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    return ImageFont.load_default()
+
+def _wrap(d, text, font, max_w):
+    lines, cur = [], ""
+    for w in str(text).split():
+        t = (cur + " " + w).strip()
+        if cur and d.textlength(t, font=font) > max_w:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = t
+    if cur:
+        lines.append(cur)
+    return lines
+
+def _heart(d, x, y, s, fill):
+    d.ellipse([x - s, y - s, x, y], fill=fill)
+    d.ellipse([x, y - s, x + s, y], fill=fill)
+    d.polygon([(x - s, y - s // 3), (x + s, y - s // 3), (x, y + s)], fill=fill)
+
+def _center_text(d, x, y, text, font, fill):
+    try:
+        d.text((x, y), text, font=font, fill=fill, anchor="mm")
+    except Exception:
+        l, t, r, b = d.textbbox((0, 0), text, font=font)
+        d.text((x - (r - l) // 2, y - (b - t) // 2), text, font=font, fill=fill)
+
+async def _fetch_cute_photo(user_id=None):
+    if user_id and user_id in BACKGROUNDS:
+        try:
+            f = await bot.get_file(BACKGROUNDS[user_id])
+            buf = io.BytesIO()
+            await bot.download_file(f.file_path, buf)
+            buf.seek(0)
+            return Image.open(buf).convert("RGB")
+        except Exception:
+            pass
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(random.choice(CUTE_IMAGES),
+                                   timeout=aiohttp.ClientTimeout(total=8)) as r:
+                if r.status == 200:
+                    return Image.open(io.BytesIO(await r.read())).convert("RGB")
+    except Exception:
+        pass
+    return None
+
+async def get_day_lessons(user_id, target_date):
+    day_ru = DAY_NAMES["ru"][target_date.weekday()]
+    week_type = get_week_type(target_date)
+    async with aiosqlite.connect(DB) as db:
+        async with db.execute("""SELECT time, subject, lesson_type, room, teacher FROM schedule
+            WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую') AND (hidden IS NULL OR hidden=0)""",
+            (user_id, day_ru, week_type)) as cur:
+            rows = await cur.fetchall()
+    return sorted(rows, key=lambda l: time_sort_key(l[0])), week_type
+
+async def make_day_card(day_title, week_label, lessons, lang, user_id=None):
+    W, pad = 1080, 56
+    card_h, gap = 240, 30
+    bg = await _fetch_cute_photo(user_id)
+    photo_h = 520 if lessons else 760
+    top = photo_h if bg is not None else 250
+    H = top + 460 if not lessons else top + 40 + len(lessons) * (card_h + gap) + 150
+
+    img = Image.new("RGB", (W, H), (255, 238, 246))
+    d = ImageDraw.Draw(img)
+    top_c, bot_c = (255, 240, 247), (255, 198, 223)
+    for y in range(H):
+        t = y / max(H - 1, 1)
+        d.line([(0, y), (W, y)],
+               fill=tuple(int(a + (b - a) * t) for a, b in zip(top_c, bot_c)))
+
+    rnd = random.Random(11)
+    for _ in range(70):
+        x, yy = rnd.randint(0, W), rnd.randint(0, H)
+        s = rnd.choice([3, 4, 5])
+        d.line([(x - s, yy), (x + s, yy)], fill=(255, 255, 255))
+        d.line([(x, yy - s), (x, yy + s)], fill=(255, 255, 255))
+    for _ in range(9):
+        x, yy = rnd.randint(40, W - 40), rnd.randint(top, max(top + 1, H - 40))
+        _heart(d, x, yy, rnd.choice([7, 9, 11]), (255, 170, 200))
+
+    if bg is not None:
+        ratio = max(W / bg.width, photo_h / bg.height)
+        nw, nh = int(bg.width * ratio) + 1, int(bg.height * ratio) + 1
+        bg = bg.resize((nw, nh))
+        bx, by = (nw - W) // 2, (nh - photo_h) // 2
+        img.paste(bg.crop((bx, by, bx + W, by + photo_h)), (0, 0))
+        img = img.convert("RGBA")
+        img.alpha_composite(Image.new("RGBA", (W, photo_h), (255, 214, 233, 150)), (0, 0))
+        img = img.convert("RGB")
+        d = ImageDraw.Draw(img)
+        d.line([(0, photo_h - 3), (W, photo_h - 3)], fill=(255, 190, 215), width=5)
+
+    f_day, f_week = _font(72, bold=True), _font(36, bold=True)
+    ty = 48
+    for line in _wrap(d, day_title, f_day, W - 2 * pad):
+        d.text((pad, ty), line, font=f_day,
+               fill=(255, 255, 255) if bg is not None else PINK_DARK,
+               stroke_width=3 if bg is not None else 0, stroke_fill=PINK_DARK)
+        ty += 84
+    d.text((pad, ty + 4), week_label, font=f_week,
+           fill=(255, 255, 255) if bg is not None else PINK_DARK)
+
+    f_num, f_type = _font(50, bold=True), _font(26, bold=True)
+    f_time, f_subj = _font(34, bold=True), _font(38, bold=True)
+    f_meta = _font(28)
+
+    if not lessons:
+        empty_txt = ("Пар нет. День красоты и отдыха!" if lang == "ru"
+                     else "No lessons. A day for beauty and rest!")
+        d.rounded_rectangle([pad, top + 60, W - pad, top + 300], radius=40,
+                            fill=CARD_FILL, outline=CARD_LINE, width=3)
+        ey = top + 120
+        for line in _wrap(d, empty_txt, f_subj, W - 2 * pad - 60):
+            d.text((pad + 30, ey), line, font=f_subj, fill=PINK_DARK)
+            ey += 48
+    else:
+        y = top + 40
+        for num, (time_, subj, ltype, room, teacher) in enumerate(lessons, 1):
+            cy = y + card_h // 2
+            d.rounded_rectangle([pad, y, W - pad, y + card_h], radius=34,
+                                fill=CARD_FILL, outline=CARD_LINE, width=3)
+            bx_, by_ = pad + 66, cy
+            d.ellipse([bx_ - 40, by_ - 40, bx_ + 40, by_ + 40],
+                      fill=(255, 224, 238), outline=PINK_ACCENT, width=3)
+            _center_text(d, bx_, by_, str(num), f_num, PINK_DARK)
+            tx = pad + 140
+            max_w = W - pad - tx - 24
+            d.text((tx, y + 20), (ltype or "").upper(), font=f_type, fill=PINK_ACCENT)
+            d.text((tx, y + 52), time_ or "", font=f_time, fill=PINK_DARK)
+            sy = y + 96
+            for line in _wrap(d, subj, f_subj, max_w)[:2]:
+                d.text((tx, sy), line, font=f_subj, fill=(105, 45, 75))
+                sy += 46
+            meta = " · ".join(x for x in [teacher, ("ауд. " + room if room else "")] if x)
+            if meta:
+                d.text((tx, y + card_h - 44), meta, font=f_meta, fill=PINK_MUTED)
+            y += card_h + gap
+
+    footer = "с любовью, твоя помощница" if lang == "ru" else "with love, your little helper"
+    d.text((pad, H - 64), footer, font=_font(30), fill=PINK_DARK)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return BufferedInputFile(buf.getvalue(), filename="schedule.png")
 
 # ---------- СЕРВЕР + НЕ ДАЁМ RENDER ЗАСНУТЬ ----------
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
