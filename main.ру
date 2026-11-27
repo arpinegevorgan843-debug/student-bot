@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw, ImageFont
 from aiogram.types import BufferedInputFile
 
 # Получаем токен из переменных окружения (Render) или используем заглушку
-BOT_TOKEN = "9055012115:AAH5l7yPfyEVZLXwyZodI69JlvGh9OiWaxA"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "9055012115:AAH5l7yPfyEVZLXwyZodI69JlvGh9OiWaxA")
 DB = "db.sqlite"
 
 # ---------- ЯЗЫКИ ----------
