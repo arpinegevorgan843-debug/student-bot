@@ -19,7 +19,7 @@ from aiohttp import web
 from PIL import Image, ImageDraw, ImageFont
 from aiogram.types import BufferedInputFile
 
-BOT_TOKEN = "9257823958:AAE0BgaUriZ44racBKpPjqC1NQvBFDicWiA"
+BOT_TOKEN = "9257823958:AAECeFJbwCiZCA8wDTZ7WIptF5QSJbZ20l4"
 DB = "db.sqlite"
 
 # ---------- ЯЗЫКИ ----------
