@@ -993,39 +993,29 @@ async def show_note_week(callback: types.CallbackQuery, action: str, subject: st
     user_id = callback.from_user.id
     lang = await get_lang(user_id)
     monday = datetime.now() - timedelta(days=datetime.now().weekday()) + timedelta(weeks=offset)
-    text = f"🗓 <b>{esc(subject)}</b> — {wd(get_week_type(monday), lang)} неделя\n"
-    text += ("Нажимай на пары своей дисциплины — там заметочка ✨\n\n" if lang == "ru"
-             else "Tap your subject's lessons — that's where the note goes ✨\n\n")
+    text = f"🌼 <b>{esc(subject)}</b> — {wd(get_week_type(monday), lang)} неделя\n"
+    text += ("Выбери пару кнопкой ниже — там будет заметочка ✨" if lang == "ru"
+             else "Pick a lesson below — the note goes there ✨")
     buttons = []
-    any_lesson = False
     async with aiosqlite.connect(DB) as db:
         for i in range(7):
             d = monday + timedelta(days=i)
             day_ru = DAY_NAMES["ru"][i]
-            date_str = f"{d.day} {MONTHS[lang][d.month - 1]}"
             async with db.execute("""SELECT id, time, subject, lesson_type, note FROM schedule
-                WHERE user_id=? AND day=? AND (week_type=? OR week_type='Каждую') AND (hidden IS NULL OR hidden=0)""",
-                (user_id, day_ru, get_week_type(d))) as cur:
+                WHERE user_id=? AND day=? AND subject=? AND (week_type=? OR week_type='Каждую') AND (hidden IS NULL OR hidden=0)""",
+                (user_id, day_ru, subject, get_week_type(d))) as cur:
                 lessons = await cur.fetchall()
-            lessons = sorted(lessons, key=lambda l: time_sort_key(l[1]))
-            if lessons:
-                text += f"📅 <b>{DAY_NAMES[lang][i]}, {date_str}:</b>\n"
-                for num, (lid, t, s, lt, note) in enumerate(lessons, 1):
-                    if s == subject:
-                        any_lesson = True
-                        if note:
-                            short = esc(note[:40]) + ("…" if len(note) > 40 else "")
-                            text += f"   {num}. {esc(t)} — 💌 {short}\n"
-                            buttons.append((f"↩️ {num}. {t[:5]}", f"nslot_{action}_{lid}"))
-                        else:
-                            text += f"   {num}. {esc(t)} — {esc(lt)}\n"
-                            buttons.append((f"💌 {num}. {t[:5]}", f"nslot_{action}_{lid}"))
-                    else:
-                        text += f"   {num}. (—)\n"
-                text += "\n"
-    if not any_lesson:
-        text += ("У этой дисциплины на этой неделе пар нет 🙈\n\n" if lang == "ru"
-                 else "No lessons of this subject this week 🙈\n\n")
+            for lid, t, s, lt, note in sorted(lessons, key=lambda l: time_sort_key(l[1])):
+                ds = f"{d.day}.{d.month:02d}"
+                if note:
+                    short = note[:25] + ("…" if len(note) > 25 else "")
+                    label = f"💌 {DAYS_SHORT[lang][i]} {ds} · {t} — {short}"
+                else:
+                    label = f"➕ {DAYS_SHORT[lang][i]} {ds} · {t}"
+                buttons.append((label, f"nslot_{action}_{lid}"))
+    if not buttons:
+        text += ("\n\nНа этой неделе у этой дисциплины пар нет 🙈" if lang == "ru"
+                 else "\n\nNo lessons of this subject this week 🙈")
     b = InlineKeyboardBuilder()
     for label, data in buttons:
         b.button(text=label, callback_data=data)
@@ -1033,7 +1023,7 @@ async def show_note_week(callback: types.CallbackQuery, action: str, subject: st
     b.button(text="След. неделя ➡️" if lang == "ru" else "Next ➡️", callback_data=f"nweek_{action}_{idx}_{offset+1}")
     b.button(text="◀️ Другая дисциплина" if lang == "ru" else "◀️ Another subject", callback_data=f"nback_{action}")
     b.button(text=T(lang, "btn_back"), callback_data="nmenu_back")
-    b.adjust(3, 2)
+    b.adjust(2, 1, 1)
     try:
         await callback.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="HTML")
     except Exception:
@@ -1065,6 +1055,7 @@ async def note_slot_pick(callback: types.CallbackQuery, state: FSMContext):
             await db.execute("UPDATE schedule SET note=NULL WHERE id=?", (lid,))
             await db.commit()
         await callback.answer("🗑 Заметочка удалена" if lang == "ru" else "🗑 Note deleted")
+        await show_note_week(callback, action, subj, 0, 0)
         return
 
     await state.update_data(note_id=lid, note_mode=action)
