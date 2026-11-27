@@ -380,6 +380,8 @@ PHOTO_REPLY_TASKS = {}
 PHOTO_COUNTS = {}
 LANGS = {}
 BACKGROUNDS = {}
+BG_CACHE = {}
+_FONT_CACHE = {}
 
 def subject_emoji(subj: str) -> str:
     s = (subj or "").lower()
@@ -387,7 +389,7 @@ def subject_emoji(subj: str) -> str:
         return "🏛️"
     if any(x in s for x in ["уголов", "кримин", "судоустройств", "criminal", "court"]):
         return "⚖️"
-    if any(x in s for x in ["гражд", "хозяйств", "предпринимат", "civil"]):
+    if any(x in s for x in ["гражд", "хозяйств", "предпринимat", "civil"]):
         return "📜"
     if any(x in s for x in ["история", "history", "древн"]):
         return "📂"
@@ -1424,23 +1426,19 @@ async def get_subjects(user_id):
             seen.append(subj)
     return seen
 
-async def get_subject_lessons(user_id, subject):
+async def get_subject_week_lessons(user_id, subject, monday):
+    """Пары дисциплины за одну неделю (с понедельника). Возвращает (дата, время, тип, аудитория)."""
     out = []
-    now = datetime.now()
     async with aiosqlite.connect(DB) as db:
-        for i in range(14):
-            d = now + timedelta(days=i)
-            day_ru = DAY_NAMES["ru"][d.weekday()]
+        for i in range(7):
+            d = monday + timedelta(days=i)
+            day_ru = DAY_NAMES["ru"][i]
             async with db.execute("""SELECT time, lesson_type, room FROM schedule
                 WHERE user_id=? AND day=? AND subject=? AND (hidden IS NULL OR hidden=0)
                 AND (week_type=? OR week_type='Каждую')""",
                 (user_id, day_ru, subject, get_week_type(d))) as cur:
                 rows = await cur.fetchall()
             for time_, ltype, room in sorted(rows, key=lambda x: time_sort_key(x[0])):
-                if i == 0:
-                    m = re.match(r"(\d{1,2}):(\d{2})", time_ or "")
-                    if m and (int(m.group(1)), int(m.group(2))) <= (now.hour, now.minute):
-                        continue
                 out.append((d, time_, ltype, room))
     return out
 
@@ -1506,12 +1504,46 @@ async def grades_action(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(GR_TITLES[action][lang], reply_markup=b.as_markup())
     await callback.answer()
 
+async def show_grade_week(callback: types.CallbackQuery, idx: int, offset: int, lang: str):
+    """Неделя с парами одной дисциплины: листаем назад/вперёд, прошедшие пары тоже можно."""
+    user_id = callback.from_user.id
+    subjects = await get_subjects(user_id)
+    subject = subjects[idx]
+    now = datetime.now()
+    monday = now - timedelta(days=now.weekday()) + timedelta(weeks=offset)
+    lessons = await get_subject_week_lessons(user_id, subject, monday)
+
+    text = f"🎀 <b>{esc(subject)}</b> — {wd(get_week_type(monday), lang)} неделя\n"
+    text += ("🕰 — пара уже прошла, оценочку тоже можно поставить ✨" if lang == "ru"
+             else "🕰 — past lesson, you can still add a grade ✨")
+    if not lessons:
+        text += ("\n\nНа этой неделе у этой дисциплины пар нет 🙈" if lang == "ru"
+                 else "\n\nNo lessons of this subject this week 🙈")
+
+    b = InlineKeyboardBuilder()
+    n = 0
+    for d, time_, ltype, room in lessons:
+        past = datetime(d.year, d.month, d.day) < datetime(now.year, now.month, now.day)
+        label = f"{'🕰' if past else '📅'} {DAYS_SHORT[lang][d.weekday()]} {d.day}.{d.month:02d} · {time_}"
+        b.button(text=label, callback_data=f"gles_{d.date().isoformat()}_{time_}")
+        n += 1
+    b.button(text="⬅️ Пред. неделя" if lang == "ru" else "⬅️ Prev", callback_data=f"gweek_{idx}_{offset-1}")
+    b.button(text="След. неделя ➡️" if lang == "ru" else "Next ➡️", callback_data=f"gweek_{idx}_{offset+1}")
+    b.button(text=T(lang, "btn_back"), callback_data="gmenu_back")
+    b.adjust(*([1] * n), 2, 1)
+    try:
+        await callback.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=b.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
 @dp.callback_query(F.data.startswith("gsub_"))
 async def grades_subject(callback: types.CallbackQuery, state: FSMContext):
     lang = await get_lang(callback.from_user.id)
     _, action, idx = callback.data.split("_")
+    idx = int(idx)
     subjects = await get_subjects(callback.from_user.id)
-    subject = subjects[int(idx)]
+    subject = subjects[idx]
 
     if action == "view":
         async with aiosqlite.connect(DB) as db:
@@ -1524,24 +1556,10 @@ async def grades_subject(callback: types.CallbackQuery, state: FSMContext):
         return
 
     if action == "add":
-        await state.update_data(gr_subject=subject)
-        lessons = await get_subject_lessons(callback.from_user.id, subject)
-        if not lessons:
-            await callback.answer("У этой дисциплины больше нет ближайших пар 🙈" if lang == "ru" else "No upcoming lessons 🙈")
-            return
-        await state.update_data(gr_lessons=[l[0].isoformat() for l in lessons])
-        b = InlineKeyboardBuilder()
-        for i, (d, time_, ltype, room) in enumerate(lessons):
-            label = f"{DAY_NAMES[lang][d.weekday()]}, {d.day} {MONTHS[lang][d.month - 1]} · {time_}"
-            b.button(text=label, callback_data=f"gles_{i}")
-        b.button(text=T(lang, "btn_back"), callback_data="gmenu_back")
-        b.adjust(1)
-        head = (f"📅 <b>{esc(subject)}</b> — ближайшие пары. На какую оценочка?"
-                if lang == "ru" else f"📅 <b>{esc(subject)}</b> — upcoming lessons. For which one?")
-        await callback.message.edit_text(head, reply_markup=b.as_markup(), parse_mode="HTML")
-        await callback.answer()
+        await show_grade_week(callback, idx, 0, lang)
         return
 
+    # edit / del: показываем список оценочек дисциплины
     async with aiosqlite.connect(DB) as db:
         async with db.execute("""SELECT id, date, grade, reason FROM grades
             WHERE user_id=? AND subject=? ORDER BY date, id""",
@@ -1567,15 +1585,20 @@ async def grades_subject(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=b.as_markup(), parse_mode="HTML")
     await callback.answer()
 
+@dp.callback_query(F.data.startswith("gweek_"))
+async def grades_week_nav(callback: types.CallbackQuery):
+    lang = await get_lang(callback.from_user.id)
+    _, idx, offset = callback.data.split("_")
+    await show_grade_week(callback, int(idx), int(offset), lang)
+
 @dp.callback_query(F.data.startswith("gles_"))
 async def grades_pick_lesson(callback: types.CallbackQuery, state: FSMContext):
     lang = await get_lang(callback.from_user.id)
-    data = await state.get_data()
-    lessons = data.get("gr_lessons", [])
-    i = int(callback.data.split("_")[1])
-    await state.update_data(gr_date=lessons[i])
-    await callback.message.answer("Какая оценочка? (2–5)\n(«Отмена» — передумать)" if lang == "ru"
-                                  else "What grade? (2–5)\n(«Cancel» to abort)")
+    _, date_iso, time_ = callback.data.split("_", 2)
+    await state.update_data(gr_date=date_iso)
+    await callback.message.answer(
+        f"Какая оценочка за пару «{esc(time_)}»? (2–5)\n(«Отмена» — передумать)" if lang == "ru"
+        else f"What grade for the lesson «{esc(time_)}»? (2–5)\n(«Cancel» to abort)")
     await state.set_state(BotStates.waiting_for_grade_value)
     await callback.answer()
 
@@ -1720,6 +1743,7 @@ async def photo_bg_handler(message: types.Message):
     caption = (message.caption or "").strip().lower()
     if caption in ("фон", "background"):
         BACKGROUNDS[message.from_user.id] = message.photo[-1].file_id
+        BG_CACHE.pop(message.from_user.id, None)
         lang = await get_lang(message.from_user.id)
         await message.answer(T(lang, "bg_saved"))
 
@@ -1749,20 +1773,36 @@ CARD_FILL = (255, 250, 252)
 CARD_LINE = (255, 178, 208)
 
 def _font(size, bold=False):
+    key = (size, bold)
+    if key in _FONT_CACHE:
+        return _FONT_CACHE[key]
+    f = None
     try:
         from matplotlib import font_manager
         family = "DejaVu Sans Bold" if bold else "DejaVu Sans"
-        return ImageFont.truetype(font_manager.findfont(family), size)
+        f = ImageFont.truetype(font_manager.findfont(family), size)
     except Exception:
         pass
-    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-    for path in ("/usr/share/fonts/truetype/dejavu/" + name,
-                 "/usr/share/fonts/dejavu/" + name):
-        try:
-            return ImageFont.truetype(path, size)
-        except Exception:
-            pass
-    return ImageFont.load_default()
+    if f is None:
+        name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+        for path in ("/usr/share/fonts/truetype/dejavu/" + name,
+                     "/usr/share/fonts/dejavu/" + name):
+            try:
+                f = ImageFont.truetype(path, size)
+                break
+            except Exception:
+                pass
+    if f is None:
+        f = ImageFont.load_default()
+    _FONT_CACHE[key] = f
+    return f
+
+def _pink_gradient(W, H):
+    grad = Image.new("RGB", (1, 2))
+    px = grad.load()
+    px[0, 0] = (255, 240, 247)
+    px[0, 1] = (255, 198, 223)
+    return grad.resize((W, H))
 
 def _wrap(d, text, font, max_w):
     lines, cur = [], ""
@@ -1791,12 +1831,16 @@ def _center_text(d, x, y, text, font, fill):
 
 async def _fetch_cute_photo(user_id=None):
     if user_id and user_id in BACKGROUNDS:
+        if user_id in BG_CACHE:
+            return BG_CACHE[user_id].copy()
         try:
             f = await bot.get_file(BACKGROUNDS[user_id])
             buf = io.BytesIO()
             await bot.download_file(f.file_path, buf)
             buf.seek(0)
-            return Image.open(buf).convert("RGB")
+            img = Image.open(buf).convert("RGB")
+            BG_CACHE[user_id] = img
+            return img.copy()
         except Exception:
             pass
     try:
@@ -1829,11 +1873,7 @@ async def make_day_card(day_title, week_label, lessons, lang, user_id=None):
 
     img = Image.new("RGB", (W, H), (255, 238, 246))
     d = ImageDraw.Draw(img)
-    top_c, bot_c = (255, 240, 247), (255, 198, 223)
-    for y in range(H):
-        t = y / max(H - 1, 1)
-        d.line([(0, y), (W, y)],
-               fill=tuple(int(a + (b - a) * t) for a, b in zip(top_c, bot_c)))
+    img.paste(_pink_gradient(W, H), (0, 0))
 
     rnd = random.Random(11)
     for _ in range(70):
