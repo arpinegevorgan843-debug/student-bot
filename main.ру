@@ -1758,6 +1758,12 @@ CARD_FILL = (255, 250, 252)
 CARD_LINE = (255, 178, 208)
 
 def _font(size, bold=False):
+    try:
+        from matplotlib import font_manager
+        family = "DejaVu Sans Bold" if bold else "DejaVu Sans"
+        return ImageFont.truetype(font_manager.findfont(family), size)
+    except Exception:
+        pass
     name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
     for path in ("/usr/share/fonts/truetype/dejavu/" + name,
                  "/usr/share/fonts/dejavu/" + name):
