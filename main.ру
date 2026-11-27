@@ -15,7 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 from PIL import Image, ImageDraw, ImageFont
 from aiogram.types import BufferedInputFile
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "ВСТАВЬ_ТОКЕН")
+BOT_TOKEN = "9257823958:AAE0BgaUriZ44racBKpPjqC1NQvBFDicWiA"
 DB = "db.sqlite"
 PHOTO_CACHE_DIR = "photo_cache"  # <--- Папка для кэша фото
 
